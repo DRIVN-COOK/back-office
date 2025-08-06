@@ -5,16 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "use:shared:dev": "node ../infra/scripts/use-shared.js dev front-office",
-    "use:shared:prod": "node ../infra/scripts/use-shared.js prod front-office"
+    "use:shared:prod": "node use-shared.js prod front-office"
   },
   "dependencies": {
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@drivn-cook/shared": "^1.0.0"
+    "dotenv": "^17.2.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",
