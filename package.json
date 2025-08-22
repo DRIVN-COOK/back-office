@@ -8,8 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "use:shared:dev": "node ../infra/scripts/use-shared.js dev front-office",
-    "use:shared:prod": "node use-shared.js prod front-office"
+    "use:shared:dev": "node ../infra/scripts/use-shared.js dev back-office",
+    "use:shared:prod": "node use-shared.js prod back-office"
   },
   "dependencies": {
     "dotenv": "^17.2.1",
