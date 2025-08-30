@@ -1,76 +1,116 @@
-import { lazy, Suspense, useEffect, type JSX } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
-
-// 👉 adapte l'import selon ton shared (ex: '@drivn-cook/shared')
+import { lazy, Suspense, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth, setApiBaseUrl } from '@drivn-cook/shared';
 import { API_URL } from './config.js';
 
-const HomePage = lazy(() => import('./pages/HomePage')); // ta page dashboard
+/* Pages */
+const HomePage = lazy(() => import('./pages/HomePage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 
+const FranchiseesPage = lazy(() => import('./pages/franchisees/FranchiseesPage'));
+const AgreementsPage = lazy(() => import('./pages/franchisees/AgreementsPage'));
+
+const TrucksPage = lazy(() => import('./pages/trucks/TrucksPage'));
+const DeploymentsPage = lazy(() => import('./pages/trucks/DeploymentsPage'));
+const MaintenancePage = lazy(() => import('./pages/trucks/MaintenancePage'));
+
+const WarehousesPage = lazy(() => import('./pages/warehouses/WarehousesPage'));
+const InventoryPage = lazy(() => import('./pages/warehouses/InventoryPage'));
+const StockMovementsPage = lazy(() => import('./pages/warehouses/StockMovementsPage'));
+
+const SuppliersPage = lazy(() => import('./pages/suppliers/SuppliersPage'));
+const ProductsPage = lazy(() => import('./pages/catalog/ProductsPage'));
+const PricesPage = lazy(() => import('./pages/catalog/PricesPage'));
+
+const PurchaseOrdersPage = lazy(() => import('./pages/procurement/PurchaseOrdersPage'));
+
+const CustomerOrdersPage = lazy(() => import('./pages/sales/CustomerOrdersPage'));
+const PaymentsPage = lazy(() => import('./pages/sales/PaymentsPage'));
+const InvoicesPage = lazy(() => import('./pages/sales/InvoicesPage'));
+
+const LoyaltyPage = lazy(() => import('./pages/loyalty/LoyaltyPage'));
+const EventsPage = lazy(() => import('./pages/events/EventsPage'));
+
+const ReportingPage = lazy(() => import('./pages/reporting/ReportingPage'));
+const RoyaltiesPage = lazy(() => import('./pages/reporting/RoyaltiesPage'));
+
+const AdminUsersPage = lazy(() => import('./pages/admin/AdminUsersPage'));
+const AuditLogPage = lazy(() => import('./pages/admin/AuditLogPage'));
+
+/* Layouts */
+import AdminLayout from './layouts/AdminLayout';
+import AuthLayout from './layouts/AuthLayout';
+
+/* Guard */
 function AdminRoute({ children }: { children: JSX.Element }) {
   const { user, isLoading } = useAuth();
   if (isLoading) return null;
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== 'ADMIN') return <Navigate to="/login" replace />;
+  if (!['ADMIN', 'HQ_STAFF'].includes(user.role)) return <Navigate to="/login" replace />;
   return children;
 }
 
-function Shell({ children }: { children: JSX.Element }) {
-  const { user, logout } = useAuth();
-  return (
-    <div className="min-h-screen flex flex-col">
-      <header className="px-4 py-3 border-b flex items-center gap-4">
-        <Link to="/">DRIVN-COOK (Back Office)</Link>
-        <div className="ml-auto flex items-center gap-3">
-          {user ? (
-            <>
-              <span>{user.email} — {user.role}</span>
-              <button onClick={logout}>Se déconnecter</button>
-            </>
-          ) : (
-            <>
-              <Link to="/login">Connexion</Link>
-              <Link to="/register">Créer un compte</Link>
-            </>
-          )}
-        </div>
-      </header>
-      <main className="flex-1 p-4">{children}</main>
-      <footer className="px-4 py-3 border-t text-sm opacity-70">© DRIVN-COOK</footer>
-    </div>
-  );
-}
-
 export default function App() {
-  // fixe la base API du shared (dev & prod)
-  useEffect(() => {
-    setApiBaseUrl(API_URL);
-  }, []);
+  useEffect(() => { setApiBaseUrl(API_URL); }, []);
 
   return (
     <AuthProvider>
       <BrowserRouter>
         <Suspense fallback={null}>
-          <Shell>
-            <Routes>
-              {/* dashboard/admin routes protégées */}
-              <Route
-                path="/"
-                element={
-                  <AdminRoute>
-                    <HomePage />
-                  </AdminRoute>
-                }
-              />
-
+          <Routes>
+            {/* Auth publiques */}
+            <Route element={<AuthLayout />}>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
+            </Route>
 
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </Shell>
+            {/* Admin protégées */}
+            <Route element={<AdminRoute><AdminLayout /></AdminRoute>}>
+              <Route index element={<HomePage />} />
+
+              {/* Franchise */}
+              <Route path="franchisees" element={<FranchiseesPage />} />
+              <Route path="agreements" element={<AgreementsPage />} />
+
+              {/* Camions */}
+              <Route path="trucks" element={<TrucksPage />} />
+              <Route path="deployments" element={<DeploymentsPage />} />
+              <Route path="maintenance" element={<MaintenancePage />} />
+
+              {/* Entrepôts & stocks */}
+              <Route path="warehouses" element={<WarehousesPage />} />
+              <Route path="inventory" element={<InventoryPage />} />
+              <Route path="movements" element={<StockMovementsPage />} />
+
+              {/* Catalogue */}
+              <Route path="suppliers" element={<SuppliersPage />} />
+              <Route path="products" element={<ProductsPage />} />
+              <Route path="prices" element={<PricesPage />} />
+
+              {/* Appro */}
+              <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
+
+              {/* Ventes */}
+              <Route path="customer-orders" element={<CustomerOrdersPage />} />
+              <Route path="payments" element={<PaymentsPage />} />
+              <Route path="invoices" element={<InvoicesPage />} />
+
+              {/* Fidélité & évènements */}
+              <Route path="loyalty" element={<LoyaltyPage />} />
+              <Route path="events" element={<EventsPage />} />
+
+              {/* Reporting */}
+              <Route path="reporting" element={<ReportingPage />} />
+              <Route path="royalties" element={<RoyaltiesPage />} />
+
+              {/* Admin */}
+              <Route path="admin/users" element={<AdminUsersPage />} />
+              <Route path="admin/audit" element={<AuditLogPage />} />
+            </Route>
+
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </Suspense>
       </BrowserRouter>
     </AuthProvider>
