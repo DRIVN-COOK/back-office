@@ -6,7 +6,6 @@ import { API_URL } from './config.js';
 /* Pages */
 const HomePage = lazy(() => import('./pages/HomePage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
-const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 
 const FranchiseesPage = lazy(() => import('./pages/franchisees/FranchiseesPage'));
 const AgreementsPage = lazy(() => import('./pages/franchisees/AgreementsPage'));
@@ -24,10 +23,13 @@ const ProductsPage = lazy(() => import('./pages/catalog/ProductsPage'));
 const PricesPage = lazy(() => import('./pages/catalog/PricesPage'));
 
 const PurchaseOrdersPage = lazy(() => import('./pages/procurement/PurchaseOrdersPage'));
+const CreatePurchaseOrderPage = lazy(() => import('./pages/procurement/CreatePurchaseOrderPage'));
+const PurchaseOrderDetailPage = lazy(() => import('./pages/procurement/PurchaseOrderDetailPage'));
 
 const CustomerOrdersPage = lazy(() => import('./pages/sales/CustomerOrdersPage'));
 const PaymentsPage = lazy(() => import('./pages/sales/PaymentsPage'));
 const InvoicesPage = lazy(() => import('./pages/sales/InvoicesPage'));
+const OrderDetailPage = lazy(() => import('./pages/sales/OrderDetailPage'));
 
 const LoyaltyPage = lazy(() => import('./pages/loyalty/LoyaltyPage'));
 const EventsPage = lazy(() => import('./pages/events/EventsPage'));
@@ -40,16 +42,22 @@ const AuditLogPage = lazy(() => import('./pages/admin/AuditLogPage'));
 
 /* Layouts */
 import AdminLayout from './layouts/AdminLayout';
-import AuthLayout from './layouts/AuthLayout';
 
 /* Guard */
 function AdminRoute({ children }: { children: JSX.Element }) {
   const { user, isLoading } = useAuth();
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <div className="min-h-screen grid place-items-center">
+        <div className="animate-pulse text-sm opacity-70">Chargement…</div>
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/login" replace />;
   if (!['ADMIN', 'HQ_STAFF'].includes(user.role)) return <Navigate to="/login" replace />;
   return children;
 }
+
 
 export default function App() {
   useEffect(() => { setApiBaseUrl(API_URL); }, []);
@@ -60,11 +68,8 @@ export default function App() {
         <Suspense fallback={null}>
           <Routes>
             {/* Auth publiques */}
-            <Route element={<AuthLayout />}>
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegisterPage />} />
-            </Route>
-
+            <Route path="/login" element={<LoginPage />} />
+              
             {/* Admin protégées */}
             <Route element={<AdminRoute><AdminLayout /></AdminRoute>}>
               <Route index element={<HomePage />} />
@@ -90,9 +95,13 @@ export default function App() {
 
               {/* Appro */}
               <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
+              <Route path="purchase-orders/new" element={<CreatePurchaseOrderPage />} />
+              <Route path="purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
+
 
               {/* Ventes */}
               <Route path="customer-orders" element={<CustomerOrdersPage />} />
+              <Route path="customer-orders/:id" element={<OrderDetailPage />} />
               <Route path="payments" element={<PaymentsPage />} />
               <Route path="invoices" element={<InvoicesPage />} />
 

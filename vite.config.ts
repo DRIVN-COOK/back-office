@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import dotenv from 'dotenv'
+import tailwindcss from '@tailwindcss/vite'
 
 dotenv.config({ path: '../infra/.env' })
 
@@ -9,7 +10,7 @@ export default defineConfig(() => {
   const apiPort = Number(process.env.PORT_API || 3000)
 
   return {
-    plugins: [react()],
+    plugins: [react(), tailwindcss(),],
     resolve: {
       // IMPORTANT : évite 2 instances de React avec les symlinks
       dedupe: ['react', 'react-dom'],
