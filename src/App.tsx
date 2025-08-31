@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth, setApiBaseUrl } from '@drivn-cook/shared';
+import { AuthProvider, useAuth, setApiBaseUrl, setErrorNotifier } from '@drivn-cook/shared';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import { API_URL } from './config.js';
 
 /* Pages */
@@ -60,12 +62,45 @@ function AdminRoute({ children }: { children: JSX.Element }) {
 
 
 export default function App() {
-  useEffect(() => { setApiBaseUrl(API_URL); }, []);
+  useEffect(() => { 
+    setApiBaseUrl(API_URL);
+
+    setErrorNotifier((err) => {
+      const hasDetails = err.details && err.details.length > 0;
+      const body = hasDetails ? (
+        <div>
+          <div className="font-semibold">{err.title}</div>
+          <div className="opacity-80">{err.message}</div>
+          <ul className="mt-2 list-disc pl-5">
+            {err.details!.map((d, i) => <li key={i}>{d}</li>)}
+          </ul>
+        </div>
+      ) : (
+        <div>
+          <div className="font-semibold">{err.title}</div>
+          <div className="opacity-80">{err.message}</div>
+        </div>
+      );
+
+      toast.error(body, {
+        position: 'top-right',
+        autoClose: 5000,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+        theme: 'colored',
+      });
+    });
+    
+   }, []);
+
+  
 
   return (
     <AuthProvider>
       <BrowserRouter>
         <Suspense fallback={null}>
+          <ToastContainer />
           <Routes>
             {/* Auth publiques */}
             <Route path="/login" element={<LoginPage />} />
