@@ -44,7 +44,6 @@ export default function FranchiseesPage() {
   const [items, setItems] = useState<Franchisee[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const pages = useMemo(() => Math.max(1, Math.ceil(total / q.pageSize)), [total, q.pageSize]);
 
   // Modal
   const [isOpen, setIsOpen] = useState(false);

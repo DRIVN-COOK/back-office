@@ -43,15 +43,15 @@ export default function AdminUsersPage() {
   const pages = useMemo(() => Math.max(1, Math.ceil(total / q.pageSize)), [total, q.pageSize]);
 
   async function setRole(u: Row, role: Role) {
-    await api.put(`/users/${u.id}/role`, { role });
+    await api.put(`/users/${u.id}`, { role });
     await load();
   }
   async function setActive(u: Row, active: boolean) {
-    await api.put(`/users/${u.id}/status`, { isActive: active });
+    await api.put(`/users/${u.id}`, { isActive: active });
     await load();
   }
   async function resetPassword(u: Row) {
-    await api.post(`/users/${u.id}/reset-password`);
+    await api.post(`/users/${u.id}`);
     alert('Si la fonctionnalité est branchée, un email de réinitialisation a été envoyé.');
   }
 

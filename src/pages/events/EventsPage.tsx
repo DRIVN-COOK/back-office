@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@drivn-cook/shared';
 
 type Row = {
@@ -41,8 +41,6 @@ export default function EventsPage() {
     } finally { setLoading(false); }
   }
   useEffect(()=>{ load(); /* eslint-disable-next-line */ }, [q.page, q.pageSize]);
-
-  const pages = useMemo(()=>Math.max(1, Math.ceil(total / q.pageSize)), [total, q.pageSize]);
   function openCreate(){ setEditing(null); setForm({ title:'', description:'', franchiseeId:'', startAt:'', endAt:'', isPublic:true, locationId:'' }); setIsOpen(true); }
   function openEdit(e: Row){ setEditing(e); setForm({ title:e.title, description:e.description||'', franchiseeId:e.franchiseeId, startAt:e.startAt, endAt:e.endAt||'', isPublic:e.isPublic, locationId:e.locationId||'' }); setIsOpen(true); }
 

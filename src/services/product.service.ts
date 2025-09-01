@@ -16,7 +16,7 @@ export async function createProduct(payload: Partial<Product>) {
 }
 
 export async function updateProduct(id: string, payload: Partial<Product>) {
-  const res = await api.patch<Product>(`/products/${id}`, payload);
+  const res = await api.put<Product>(`/products/${id}`, payload);
   return res.data;
 }
 

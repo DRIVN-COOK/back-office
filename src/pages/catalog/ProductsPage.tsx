@@ -1,13 +1,16 @@
 // back-office/src/pages/catalog/ProductsPage.tsx
 import { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
-import { api } from '@drivn-cook/shared';
 import {
+  Modal,
+  DataTable,
   productCreateSchema,
   productUpdateSchema,
-  PRODUCT_TYPE, type ProductType,
-  UNIT, type Unit,
-} from '@drivn-cook/shared'; // adapte l'import si besoin
+  ProductType,
+  Unit,
+  type Column,
+} from '@drivn-cook/shared';
+import { listProducts, createProduct, updateProduct } from '../../services';
 
 type ProductRow = {
   id: string;
@@ -20,7 +23,31 @@ type ProductRow = {
   createdAt: string;
 };
 
-type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };
+type FormShape = {
+  sku: string;
+  name: string;
+  type: ProductType;
+  unit: Unit;
+  isCoreStock: boolean;
+  active: boolean;
+};
+
+const EMPTY_FORM: FormShape = {
+  sku: '',
+  name: '',
+  type: Object.values(ProductType)[0] as ProductType,
+  unit: Object.values(Unit)[0] as Unit,
+  isCoreStock: true,
+  active: true,
+};
+
+function normalizeForm(f: FormShape) {
+  return {
+    ...f,
+    sku: f.sku.trim(),
+    name: f.name.trim(),
+  };
+}
 
 export default function ProductsPage() {
   const [items, setItems] = useState<ProductRow[]>([]);
@@ -30,40 +57,49 @@ export default function ProductsPage() {
   const [pageSize] = useState(20);
   const [total, setTotal] = useState(0);
 
-  // Modal state
+  // Modal + form
   const [isOpen, setIsOpen] = useState(false);
   const [editing, setEditing] = useState<ProductRow | null>(null);
-  const [form, setForm] = useState({
-    sku: '', name: '',
-    type: PRODUCT_TYPE[0] as ProductType,
-    unit: UNIT[2] as Unit, // UNIT
-    isCoreStock: true,
-    active: true,
-  });
+  const [form, setForm] = useState<FormShape>({ ...EMPTY_FORM });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  useEffect(() => {
+  // chargement liste
+  async function load() {
     setLoading(true);
-    (async () => {
-      try {
-        const res = await api.get<Paged<ProductRow>>('/products', { params: { search: query, page, pageSize } });
-        setItems(res.data.items ?? []);
-        setTotal(res.data.total ?? res.data.items?.length ?? 0);
-      } catch (e) {
-        console.error(e);
-        setItems([]);
-        setTotal(0);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    try {
+      const data = await listProducts({
+        q: query || undefined,
+        page,
+        pageSize,
+      });
+      setItems(data.items ?? []);
+      setTotal(data.total ?? data.items?.length ?? 0);
+    } catch (e) {
+      console.error(e);
+      setItems([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, page, pageSize]);
 
-  const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
+  // Fallback filtre client si l'API ne filtre pas (robustesse)
+  const filteredItems = useMemo(() => {
+    const s = query.trim().toLowerCase();
+    if (!s) return items;
+    return items.filter((p) =>
+      [p.sku, p.name, p.type, p.unit].some((v) => String(v ?? '').toLowerCase().includes(s)),
+    );
+  }, [items, query]);
 
   function openCreate() {
     setEditing(null);
-    setForm({ sku: '', name: '', type: PRODUCT_TYPE[0], unit: UNIT[2], isCoreStock: true, active: true });
+    setForm({ ...EMPTY_FORM });
     setErrors({});
     setIsOpen(true);
   }
@@ -84,44 +120,98 @@ export default function ProductsPage() {
 
   async function submitForm(e: React.FormEvent) {
     e.preventDefault();
+    setErrors({});
+
     try {
+      const normalized = normalizeForm(form);
+
       if (editing) {
-        const parsed = productUpdateSchema.parse(form);
-        await api.put(`/products/${editing.id}`, parsed);
+        const payload = productUpdateSchema.parse(normalized);
+        await updateProduct(editing.id, payload);
       } else {
-        const parsed = productCreateSchema.parse(form);
-        await api.post('/products', parsed);
+        const payload = productCreateSchema.parse(normalized);
+        await createProduct(payload);
         setPage(1);
       }
       setIsOpen(false);
-      // reload
-      const res = await api.get<Paged<ProductRow>>('/products', { params: { search: query, page, pageSize } });
-      setItems(res.data.items ?? []);
-      setTotal(res.data.total ?? res.data.items?.length ?? 0);
-    } catch (err: any) {
-      console.error(err);
-      if (err?.name === 'ZodError') {
+      await load();
+    } catch (err: unknown) {
+      // Zod front
+      if (err && typeof err === 'object' && 'issues' in (err as any)) {
         const zerr = err as z.ZodError;
         const map: Record<string, string> = {};
-        zerr.errors.forEach((e: { path: string[]; message: string; }) => { if (e.path[0]) map[e.path[0] as string] = e.message; });
+        zerr.issues.forEach((issue) => {
+          const key = (issue.path?.[0] ?? '') as string;
+          if (key) map[key] = issue.message;
+        });
         setErrors(map);
-      } else {
-        alert('Erreur lors de la sauvegarde.');
+        return;
       }
+      // Erreur HTTP
+      const anyErr = err as any;
+      const msg =
+        anyErr?.response?.data?.message ||
+        anyErr?.response?.data?.error ||
+        anyErr?.message ||
+        'Erreur lors de la sauvegarde.';
+      alert(msg);
+      console.error(err);
     }
   }
 
   async function toggleActive(p: ProductRow) {
     const snapshot = [...items];
-    setItems(list => list.map(x => x.id === p.id ? { ...x, active: !x.active } : x));
+    setItems((list) => list.map((x) => (x.id === p.id ? { ...x, active: !x.active } : x)));
     try {
-      await api.put(`/products/${p.id}`, { active: !p.active });
+      await updateProduct(p.id, { active: !p.active });
     } catch (e) {
       console.error(e);
       setItems(snapshot);
       alert('Impossible de changer le statut.');
     }
   }
+
+  const TYPE_OPTIONS = Object.values(ProductType) as ProductType[];
+  const UNIT_OPTIONS = Object.values(Unit) as Unit[];
+
+  // colonnes DataTable (shared)
+  const columns: Column<ProductRow>[] = [
+    { header: 'SKU', render: (p) => p.sku, getSortValue: (p) => p.sku, width: 'w-36' },
+    { header: 'Nom', render: (p) => p.name, getSortValue: (p) => p.name, width: 'min-w-[200px]' },
+    { header: 'Type', render: (p) => p.type, getSortValue: (p) => p.type, width: 'w-40' },
+    { header: 'Unité', render: (p) => p.unit, getSortValue: (p) => p.unit, width: 'w-28' },
+    {
+      header: 'Core(80%)',
+      render: (p) => (p.isCoreStock ? 'Oui' : 'Non'),
+      getSortValue: (p) => (p.isCoreStock ? 1 : 0),
+      width: 'w-28',
+    },
+    {
+      header: 'Actif',
+      render: (p) => (
+        <button onClick={() => toggleActive(p)} className="underline">
+          {p.active ? 'Actif' : 'Inactif'}
+        </button>
+      ),
+      getSortValue: (p) => (p.active ? 1 : 0),
+      width: 'w-24',
+    },
+    {
+      header: 'Actions',
+      render: (p) => (
+        <div className="text-right space-x-3">
+          <button onClick={() => openEdit(p)} className="underline">
+            Éditer
+          </button>
+          <a href={`/prices?productId=${p.id}`} className="underline">
+            Tarifs
+          </a>
+        </div>
+      ),
+      align: 'right',
+      width: 'w-36',
+    },
+  ];
 
   return (
     <section className="space-y-4">
@@ -130,7 +220,10 @@ export default function ProductsPage() {
         <div className="ml-auto flex items-center gap-2">
           <input
             value={query}
-            onChange={(e) => { setPage(1); setQuery(e.target.value); }}
+            onChange={(e) => {
+              setPage(1);
+              setQuery(e.target.value);
+            }}
             placeholder="Rechercher (SKU, nom…)"
             className="border rounded px-2 py-1 text-sm"
           />
@@ -142,149 +235,105 @@ export default function ProductsPage() {
 
       <div className="text-sm opacity-70">{loading ? 'Chargement…' : `Total: ${total}`}</div>
 
-      <div className="overflow-x-auto border rounded">
-        <table className="min-w-[900px] w-full text-sm">
-          <thead className="bg-black/5">
-            <tr>
-              <th className="text-left px-3 py-2">SKU</th>
-              <th className="text-left px-3 py-2">Nom</th>
-              <th className="text-left px-3 py-2">Type</th>
-              <th className="text-left px-3 py-2">Unité</th>
-              <th className="text-left px-3 py-2">Core(80%)</th>
-              <th className="text-left px-3 py-2">Actif</th>
-              <th className="text-right px-3 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map(p => (
-              <tr key={p.id} className="border-t">
-                <td className="px-3 py-2">{p.sku}</td>
-                <td className="px-3 py-2">{p.name}</td>
-                <td className="px-3 py-2">{p.type}</td>
-                <td className="px-3 py-2">{p.unit}</td>
-                <td className="px-3 py-2">{p.isCoreStock ? 'Oui' : 'Non'}</td>
-                <td className="px-3 py-2">
-                  <button onClick={() => toggleActive(p)} className="underline">
-                    {p.active ? 'Actif' : 'Inactif'}
-                  </button>
-                </td>
-                <td className="px-3 py-2 text-right space-x-3">
-                  <button onClick={() => openEdit(p)} className="underline">Éditer</button>
-                  <a href={`/prices?productId=${p.id}`} className="underline">Tarifs</a>
-                </td>
-              </tr>
-            ))}
-            {!loading && items.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-6 text-center opacity-60">Aucun produit</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        items={filteredItems}
+        columns={columns}
+        loading={loading}
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={(p) => setPage(p)}
+        minTableWidth="min-w-[900px]"
+      />
 
-      {/* Pagination simple */}
-      <div className="flex items-center gap-2 justify-end">
-        <button
-          disabled={page <= 1}
-          onClick={() => setPage(p => Math.max(1, p - 1))}
-          className="border rounded px-2 py-1 disabled:opacity-50"
-        >
-          Précédent
-        </button>
-        <span className="text-sm">Page {page} / {pages}</span>
-        <button
-          disabled={page >= pages}
-          onClick={() => setPage(p => Math.min(pages, p + 1))}
-          className="border rounded px-2 py-1 disabled:opacity-50"
-        >
-          Suivant
-        </button>
-      </div>
+      <Modal open={isOpen} onClose={() => setIsOpen(false)} maxWidth="max-w-lg">
+        <form onSubmit={submitForm} className="p-4 space-y-3">
+          <h2 className="text-lg font-semibold">{editing ? 'Modifier le produit' : 'Nouveau produit'}</h2>
 
-      {/* Modal create/edit */}
-      {isOpen && (
-        <div className="fixed inset-0 bg-black/20 flex items-center justify-center p-4">
-          <div className="bg-white rounded shadow-md w-full max-w-lg">
-            <form onSubmit={submitForm} className="p-4 space-y-3">
-              <h2 className="text-lg font-semibold">{editing ? 'Modifier le produit' : 'Nouveau produit'}</h2>
-
-              <div>
-                <label className="block text-sm mb-1">SKU</label>
-                <input
-                  value={form.sku}
-                  onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                  className="border rounded px-2 py-1 w-full"
-                />
-                {errors.sku && <p className="text-xs text-red-600">{errors.sku}</p>}
-              </div>
-
-              <div>
-                <label className="block text-sm mb-1">Nom</label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="border rounded px-2 py-1 w-full"
-                />
-                {errors.name && <p className="text-xs text-red-600">{errors.name}</p>}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm mb-1">Type</label>
-                  <select
-                    value={form.type}
-                    onChange={(e) => setForm({ ...form, type: e.target.value as ProductType })}
-                    className="border rounded px-2 py-1 w-full"
-                  >
-                    {PRODUCT_TYPE.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  {errors.type && <p className="text-xs text-red-600">{errors.type}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-sm mb-1">Unité</label>
-                  <select
-                    value={form.unit}
-                    onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}
-                    className="border rounded px-2 py-1 w-full"
-                  >
-                    {UNIT.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                  {errors.unit && <p className="text-xs text-red-600">{errors.unit}</p>}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={form.isCoreStock}
-                    onChange={(e) => setForm({ ...form, isCoreStock: e.target.checked })}
-                  />
-                  Core (80%)
-                </label>
-
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={form.active}
-                    onChange={(e) => setForm({ ...form, active: e.target.checked })}
-                  />
-                  Actif
-                </label>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setIsOpen(false)} className="border rounded px-3 py-1">
-                  Annuler
-                </button>
-                <button type="submit" className="border rounded px-3 py-1">
-                  {editing ? 'Enregistrer' : 'Créer'}
-                </button>
-              </div>
-            </form>
+          <div>
+            <label className="block text-sm mb-1">SKU</label>
+            <input
+              value={form.sku}
+              onChange={(e) => setForm({ ...form, sku: e.target.value })}
+              className="border rounded px-2 py-1 w-full"
+            />
+            {errors.sku && <p className="text-xs text-red-600">{errors.sku}</p>}
           </div>
-        </div>
-      )}
+
+          <div>
+            <label className="block text-sm mb-1">Nom</label>
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="border rounded px-2 py-1 w-full"
+            />
+            {errors.name && <p className="text-xs text-red-600">{errors.name}</p>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm mb-1">Type</label>
+              <select
+                value={form.type}
+                onChange={(e) => setForm({ ...form, type: e.target.value as ProductType })}
+                className="border rounded px-2 py-1 w-full"
+              >
+                {TYPE_OPTIONS.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+              {errors.type && <p className="text-xs text-red-600">{errors.type}</p>}
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1">Unité</label>
+              <select
+                value={form.unit}
+                onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}
+                className="border rounded px-2 py-1 w-full"
+              >
+                {UNIT_OPTIONS.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
+              {errors.unit && <p className="text-xs text-red-600">{errors.unit}</p>}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.isCoreStock}
+                onChange={(e) => setForm({ ...form, isCoreStock: e.target.checked })}
+              />
+              Core (80%)
+            </label>
+
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.active}
+                onChange={(e) => setForm({ ...form, active: e.target.checked })}
+              />
+              Actif
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={() => setIsOpen(false)} className="border rounded px-3 py-1">
+              Annuler
+            </button>
+            <button type="submit" className="border rounded px-3 py-1">
+              {editing ? 'Enregistrer' : 'Créer'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </section>
   );
 }

@@ -30,7 +30,7 @@ export default function InventoryPage() {
   async function load() {
     setLoading(true);
     try {
-      const res = await api.get<Paged<Row>>('/inventory', { params: { warehouseId, search: query, page, pageSize } });
+      const res = await api.get<Paged<Row>>('/warehouse-inventories', { params: { warehouseId, search: query, page, pageSize } });
       setItems(res.data.items ?? []); setTotal(res.data.total ?? res.data.items?.length ?? 0);
     } finally { setLoading(false); }
   }
@@ -50,12 +50,28 @@ export default function InventoryPage() {
       await api.post('/stock-movements', payload);
       setIsOpen(false);
       await load();
-    } catch (err: any) {
-      if (err?.name === 'ZodError') {
-        const map: Record<string,string> = {};
-        (err as z.ZodError).errors.forEach(e => { if (e.path[0]) map[String(e.path[0])] = e.message; });
+    } catch (err: unknown) {
+      // ZodError côté front
+      if (err && typeof err === 'object' && 'issues' in (err as any)) {
+        const zerr = err as z.ZodError;
+        const map: Record<string, string> = {};
+        zerr.issues.forEach((issue) => {
+          const key = (issue.path?.[0] ?? '') as string;
+          if (key) map[key] = issue.message;
+        });
         setErrors(map);
-      } else { alert('Ajustement impossible'); console.error(err); }
+        return;
+      }
+
+      // Erreur Axios/HTTP
+      const anyErr = err as any;
+      const msg =
+        anyErr?.response?.data?.message ||
+        anyErr?.response?.data?.error ||
+        anyErr?.message ||
+        'Ajustement impossible';
+      alert(msg);
+      console.error(err);
     }
   }
 

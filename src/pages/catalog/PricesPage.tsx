@@ -78,16 +78,28 @@ export default function PricesPage() {
       const res = await api.get<Paged<PriceRow>>('/product-prices', { params: { productId, page, pageSize } });
       setItems(res.data.items ?? []);
       setTotal(res.data.total ?? res.data.items?.length ?? 0);
-    } catch (err: any) {
-      console.error(err);
-      if (err?.name === 'ZodError') {
+    } catch (err: unknown) {
+      // ZodError côté front
+      if (err && typeof err === 'object' && 'issues' in (err as any)) {
         const zerr = err as z.ZodError;
         const map: Record<string, string> = {};
-        zerr.errors.forEach((e) => { if (e.path[0]) map[e.path[0] as string] = e.message; });
+        zerr.issues.forEach((issue) => {
+          const key = (issue.path?.[0] ?? '') as string;
+          if (key) map[key] = issue.message;
+        });
         setErrors(map);
-      } else {
-        alert('Erreur lors de l’ajout de prix.');
+        return;
       }
+
+      // Erreur Axios/HTTP
+      const anyErr = err as any;
+      const msg =
+        anyErr?.response?.data?.message ||
+        anyErr?.response?.data?.error ||
+        anyErr?.message ||
+        'Erreur lors de l\'ajout du prix';
+      alert(msg);
+      console.error(err);
     }
   }
 

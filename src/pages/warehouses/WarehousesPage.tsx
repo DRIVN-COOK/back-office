@@ -49,12 +49,28 @@ export default function WarehousesPage() {
       }
       setIsOpen(false);
       await load();
-    } catch (err: any) {
-      if (err?.name === 'ZodError') {
-        const map: Record<string,string> = {};
-        (err as z.ZodError).errors.forEach(e => { if (e.path[0]) map[String(e.path[0])] = e.message; });
+    } catch (err: unknown) {
+      // ZodError côté front
+      if (err && typeof err === 'object' && 'issues' in (err as any)) {
+        const zerr = err as z.ZodError;
+        const map: Record<string, string> = {};
+        zerr.issues.forEach((issue) => {
+          const key = (issue.path?.[0] ?? '') as string;
+          if (key) map[key] = issue.message;
+        });
         setErrors(map);
-      } else { alert('Erreur de sauvegarde'); console.error(err); }
+        return;
+      }
+
+      // Erreur Axios/HTTP
+      const anyErr = err as any;
+      const msg =
+        anyErr?.response?.data?.message ||
+        anyErr?.response?.data?.error ||
+        anyErr?.message ||
+        'Erreur de sauvegarde';
+      alert(msg);
+      console.error(err);
     }
   }
 

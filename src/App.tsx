@@ -104,6 +104,8 @@ export default function App() {
           <Routes>
             {/* Auth publiques */}
             <Route path="/login" element={<LoginPage />} />
+
+            <Route path="/" element={<Navigate to="/login" replace />} />
               
             {/* Admin protégées */}
             <Route element={<AdminRoute><AdminLayout /></AdminRoute>}>
@@ -153,7 +155,7 @@ export default function App() {
               <Route path="admin/audit" element={<AuditLogPage />} />
             </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </Suspense>
       </BrowserRouter>

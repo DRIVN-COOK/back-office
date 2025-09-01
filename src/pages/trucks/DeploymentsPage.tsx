@@ -45,7 +45,7 @@ export default function DeploymentsPage() {
     setLoading(true);
     (async () => {
       try {
-        const res = await api.get<Paged<DeploymentRow>>('/deployments', { params: { page, pageSize } });
+        const res = await api.get<Paged<DeploymentRow>>('/truck-deployments', { params: { page, pageSize } });
         setItems(res.data.items ?? []); setTotal(res.data.total ?? res.data.items?.length ?? 0);
       } catch (e) { console.error(e); setItems([]); setTotal(0); }
       finally { setLoading(false); }
@@ -62,16 +62,32 @@ export default function DeploymentsPage() {
         plannedEnd: form.plannedEnd ? new Date(form.plannedEnd).toISOString() : undefined,
       };
       deploymentCreateSchema.parse(payload);
-      await api.post('/deployments', payload);
+      await api.post('/truck-deployments', payload);
       setIsOpen(false);
-      const res = await api.get<Paged<DeploymentRow>>('/deployments', { params: { page, pageSize } });
+      const res = await api.get<Paged<DeploymentRow>>('/truck-deployments', { params: { page, pageSize } });
       setItems(res.data.items ?? []); setTotal(res.data.total ?? res.data.items?.length ?? 0);
-    } catch (err: any) {
-      if (err?.name === 'ZodError') {
+    } catch (err: unknown) {
+      // ZodError côté front
+      if (err && typeof err === 'object' && 'issues' in (err as any)) {
+        const zerr = err as z.ZodError;
         const map: Record<string, string> = {};
-        (err as z.ZodError).errors.forEach(e => { if (e.path[0]) map[e.path[0] as string] = e.message; });
+        zerr.issues.forEach((issue) => {
+          const key = (issue.path?.[0] ?? '') as string;
+          if (key) map[key] = issue.message;
+        });
         setErrors(map);
-      } else { alert('Erreur de création'); console.error(err); }
+        return;
+      }
+
+      // Erreur Axios/HTTP
+      const anyErr = err as any;
+      const msg =
+        anyErr?.response?.data?.message ||
+        anyErr?.response?.data?.error ||
+        anyErr?.message ||
+        'Erreur de création';
+      alert(msg);
+      console.error(err);
     }
   }
 

@@ -18,7 +18,7 @@ export async function attachFranchiseUser(payload: {
 }
 
 export async function updateFranchiseUser(id: string, payload: Partial<FranchiseUser>) {
-  const res = await api.patch<FranchiseUser>(`/franchise-users/${id}`, payload);
+  const res = await api.put<FranchiseUser>(`/franchise-users/${id}`, payload);
   return res.data;
 }
 

@@ -18,7 +18,7 @@ export default function RoyaltiesPage() {
   async function load() {
     setLoading(true);
     try {
-      const res = await api.get<Paged<RoyaltyReportDTO>>('/reports/royalties', { params: { period, franchiseeId: franchiseeId || undefined, page, pageSize }});
+      const res = await api.get<Paged<RoyaltyReportDTO>>('/revenue-share-reports', { params: { period, franchiseeId: franchiseeId || undefined, page, pageSize }});
       setItems(res.data.items ?? []); setTotal(res.data.total ?? res.data.items?.length ?? 0);
     } finally { setLoading(false); }
   }
@@ -30,7 +30,7 @@ export default function RoyaltiesPage() {
     setErrors({});
     try {
       const payload = royaltyGenerateSchema.parse({ period, franchiseeId: franchiseeId || '' });
-      const res = await api.post<RoyaltyReportDTO>('/reports/royalties/generate', payload);
+      const res = await api.post<RoyaltyReportDTO>('/revenue-share-reports', payload);
       // Réinjection ou reload
       setItems(prev => [res.data, ...prev]);
     } catch (err: any) {
@@ -48,7 +48,7 @@ export default function RoyaltiesPage() {
         window.open(r.generatedPdfUrl, '_blank');
       } else {
         // fallback: endpoint qui (re)génère/sert le PDF
-        const res = await api.get(`/reports/royalties/${r.id}/pdf`, { responseType: 'blob' });
+        const res = await api.get(`/revenue-share-reports/${r.id}/pdf`, { responseType: 'blob' });
         const url = URL.createObjectURL(res.data);
         const a = document.createElement('a'); a.href = url; a.download = `royalty_${r.period}_${r.franchiseeId.slice(0,8)}.pdf`; a.click();
         URL.revokeObjectURL(url);

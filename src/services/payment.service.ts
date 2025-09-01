@@ -16,6 +16,6 @@ export async function createPayment(payload: Partial<Payment>) {
 }
 
 export async function updatePayment(id: string, payload: Partial<Payment>) {
-  const res = await api.patch<Payment>(`/payments/${id}`, payload);
+  const res = await api.put<Payment>(`/payments/${id}`, payload);
   return res.data;
 }

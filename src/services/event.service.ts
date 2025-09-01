@@ -16,7 +16,7 @@ export async function createEvent(payload: Partial<Event>) {
 }
 
 export async function updateEvent(id: string, payload: Partial<Event>) {
-  const res = await api.patch<Event>(`/events/${id}`, payload);
+  const res = await api.put<Event>(`/events/${id}`, payload);
   return res.data;
 }
 
@@ -36,7 +36,7 @@ export async function registerToEvent(payload: { eventId: string; customerId: st
 }
 
 export async function updateEventRegistration(id: string, payload: Partial<EventRegistration>) {
-  const res = await api.patch<EventRegistration>(`/event-registrations/${id}`, payload);
+  const res = await api.put<EventRegistration>(`/event-registrations/${id}`, payload);
   return res.data;
 }
 

@@ -43,15 +43,28 @@ export default function CreatePurchaseOrderPage() {
       purchaseOrderCreateSchema.parse(payload);
       await api.post('/purchase-orders', payload);
       nav('/purchase-orders');
-    } catch (err: any) {
-      if (err?.name === 'ZodError') {
+    } catch (err: unknown) {
+      // ZodError côté front
+      if (err && typeof err === 'object' && 'issues' in (err as any)) {
+        const zerr = err as z.ZodError;
         const map: Record<string, string> = {};
-        (err as z.ZodError).errors.forEach(e => { if (e.path[0]) map[String(e.path[0])] = e.message; });
+        zerr.issues.forEach((issue) => {
+          const key = (issue.path?.[0] ?? '') as string;
+          if (key) map[key] = issue.message;
+        });
         setErrors(map);
-      } else {
-        console.error(err);
-        alert('Création impossible.');
+        return;
       }
+
+      // Erreur Axios/HTTP
+      const anyErr = err as any;
+      const msg =
+        anyErr?.response?.data?.message ||
+        anyErr?.response?.data?.error ||
+        anyErr?.message ||
+        'création impossible';
+      alert(msg);
+      console.error(err);
     }
   }
 

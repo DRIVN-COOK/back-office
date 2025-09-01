@@ -23,19 +23,26 @@ export default function SalesReportsPage() {
     try {
       const query: SalesQuery = { from, to, granularity, franchiseeId: franchiseeId || undefined };
       salesQuerySchema.parse(query);
-      const res = await api.get<Paged<SalesSummaryDTO>>('/reports/sales', { params: { ...query, page, pageSize } });
+      const res = await api.get<Paged<SalesSummaryDTO>>('/sales-summaries', { params: { ...query, page, pageSize } });
       setItems(res.data.items ?? []); setTotal(res.data.total ?? res.data.items?.length ?? 0);
-    } catch (err: any) {
-      if (err?.name === 'ZodError') {
-        const map: Record<string,string> = {};
-        (err as z.ZodError).errors.forEach(e => { if (e.path[0]) map[String(e.path[0])] = e.message; });
+    } catch (err: unknown) {
+      // ZodError côté front
+      if (err && typeof err === 'object' && 'issues' in (err as any)) {
+        const zerr = err as z.ZodError;
+        const map: Record<string, string> = {};
+        zerr.issues.forEach((issue) => {
+          const key = (issue.path?.[0] ?? '') as string;
+          if (key) map[key] = issue.message;
+        });
         setErrors(map);
-      } else {
-        console.error(err);
-        setItems([]); setTotal(0);
-      }
-    } finally { setLoading(false); }
-  }
+        } else {
+          console.error(err);
+          setItems([]); setTotal(0);
+        }
+      } finally { setLoading(false); }
+        return;
+    }
+
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [page, pageSize]);
 
@@ -43,7 +50,7 @@ export default function SalesReportsPage() {
 
   async function exportCsv() {
     try {
-      const res = await api.get('/reports/sales/export.csv', {
+      const res = await api.get('/revenue-share-reports', {
         params: { from, to, granularity, franchiseeId: franchiseeId || undefined },
         responseType: 'blob',
       });

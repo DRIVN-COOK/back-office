@@ -16,10 +16,29 @@ export async function createWarehouse(payload: Partial<Warehouse>) {
 }
 
 export async function updateWarehouse(id: string, payload: Partial<Warehouse>) {
-  const res = await api.patch<Warehouse>(`/warehouses/${id}`, payload);
+  const res = await api.put<Warehouse>(`/warehouses/${id}`, payload);
   return res.data;
 }
 
 export async function deleteWarehouse(id: string) {
   await api.delete(`/warehouses/${id}`);
+}
+
+export async function listStockMovements(params: {
+  warehouseId: string;
+  productId?: string;
+  type?: any; // ou StockMoveType si tu l’exportes depuis le shared
+  page?: number;
+  pageSize?: number;
+}) {
+  const res = await api.get('/stock-movements', {
+    params: {
+      warehouseId: params.warehouseId,
+      productId: params.productId || undefined,
+      type: params.type || undefined,
+      page: params.page ?? 1,
+      pageSize: params.pageSize ?? 50,
+    },
+  });
+  return res.data as Paged<any>; // <- remplace any par StockMovement si tu as le type
 }

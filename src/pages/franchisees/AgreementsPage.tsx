@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Modal,
   DataTable,
@@ -9,7 +9,8 @@ import {
 import {
   listFranchiseAgreements,
   createFranchiseAgreement,
-} from '../../services/franchiseAgreement.service';
+  listFranchisees
+} from '../../services';
 
 type Query = { franchiseeId: string; page: number; pageSize: number };
 
@@ -31,10 +32,10 @@ export default function AgreementsPage() {
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
-  const pages = useMemo(
-    () => Math.max(1, Math.ceil(total / q.pageSize)),
-    [total, q.pageSize]
-  );
+  const [franchiseeSearch, setFranchiseeSearch] = useState('');
+  const [franchiseeOptions, setFranchiseeOptions] = useState<Array<{ id:string; name:string }>>([]);
+  const [franchiseeLoading, setFranchiseeLoading] = useState(false);
+  const franchiseeSearchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function load() {
     if (!q.franchiseeId) {
@@ -73,6 +74,31 @@ export default function AgreementsPage() {
     setIsOpen(false);
     setForm({ ...EMPTY_FORM });
     await load();
+  }
+
+  useEffect(() => {
+    if (franchiseeSearchDebounce.current) clearTimeout(franchiseeSearchDebounce.current);
+    franchiseeSearchDebounce.current = setTimeout(() => {
+      searchFranchisees(franchiseeSearch);
+    }, 300);
+    return () => {
+      if (franchiseeSearchDebounce.current) clearTimeout(franchiseeSearchDebounce.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [franchiseeSearch]);
+
+  async function searchFranchisees(term: string) {
+  setFranchiseeLoading(true);
+    try {
+      // on limite à 50 et on trie par nom côté client
+      const data = await listFranchisees({ q: term || undefined, page: 1, pageSize: 50 });
+      const opts = (data.items ?? [])
+        .map(f => ({ id: f.id, name: f.name }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+      setFranchiseeOptions(opts);
+    } finally {
+      setFranchiseeLoading(false);
+    }
   }
 
   const columns: Column<FranchiseAgreement>[] = [
@@ -123,12 +149,25 @@ export default function AgreementsPage() {
       <header className="flex items-center gap-2">
         <h1 className="text-xl font-semibold">Accords (franchisé)</h1>
         <div className="ml-auto flex items-center gap-2">
-          <input
-            value={q.franchiseeId}
-            onChange={(e) => setQ((p) => ({ ...p, page: 1, franchiseeId: e.target.value }))}
-            placeholder="FranchiseeId"
-            className="border rounded px-2 py-1 text-sm"
-          />
+  {/* recherche par nom */}
+  <input
+    value={franchiseeSearch}
+    onChange={(e) => setFranchiseeSearch(e.target.value)}
+    placeholder="Rechercher un franchisé par nom"
+    className="border rounded px-2 py-1 text-sm"
+  />
+  {/* select des franchisés */}
+  <select
+    value={q.franchiseeId}
+    onChange={(e) => setQ((p) => ({ ...p, page: 1, franchiseeId: e.target.value }))}
+    className="border rounded px-2 py-1 text-sm min-w-[260px]">
+            <option value="">— Sélectionner un franchisé —</option>
+            {franchiseeOptions.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
+          {franchiseeLoading && <span className="text-xs opacity-60">Chargement…</span>}
+
           <button
             disabled={!q.franchiseeId}
             onClick={() => setIsOpen(true)}

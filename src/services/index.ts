@@ -1,5 +1,6 @@
 export * from './franchisee.service';
 export * from './franchiseUser.service';
+export * from './franchiseAgreement.service'
 export * from './warehouse.service';
 export * from './truck.service';
 export * from './maintenance.service';

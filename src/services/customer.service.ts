@@ -16,7 +16,7 @@ export async function createCustomer(payload: Partial<Customer>) {
 }
 
 export async function updateCustomer(id: string, payload: Partial<Customer>) {
-  const res = await api.patch<Customer>(`/customers/${id}`, payload);
+  const res = await api.put<Customer>(`/customers/${id}`, payload);
   return res.data;
 }
 

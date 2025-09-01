@@ -1,10 +1,24 @@
-import { api, type Truck, type Paged } from '@drivn-cook/shared';
+// src/services/truck.service.ts
+import { api, type Truck, TruckStatus, type Paged } from '@drivn-cook/shared';
 
-export async function listTrucks(params?: { franchiseeId?: string; page?: number; pageSize?: number; active?: boolean }) {
-  const res = await api.get<Paged<Truck>>('/trucks', { params });
-  return res.data;
+export async function listTrucks(params: {
+  search?: string;
+  status?: TruckStatus;
+  page?: number;
+  pageSize?: number;
+}) {
+  const res = await api.get('/trucks', {
+    params: {
+      // envoie les deux au cas où l’API écoute "q" (legacy) OU "search" (nouveau)
+      q: params.search || undefined,
+      search: params.search || undefined,
+      status: params.status || undefined,
+      page: params.page ?? 1,
+      pageSize: params.pageSize ?? 20,
+    },
+  });
+  return res.data; // { items, total, ... }
 }
-
 export async function getTruck(id: string) {
   const res = await api.get<Truck>(`/trucks/${id}`);
   return res.data;
@@ -16,7 +30,7 @@ export async function createTruck(payload: Partial<Truck>) {
 }
 
 export async function updateTruck(id: string, payload: Partial<Truck>) {
-  const res = await api.patch<Truck>(`/trucks/${id}`, payload);
+  const res = await api.put<Truck>(`/trucks/${id}`, payload);
   return res.data;
 }
 
