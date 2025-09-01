@@ -1,119 +1,327 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api } from '@drivn-cook/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  api,
+  Modal,
+  DataTable,
+  type Franchisee,
+  type Warehouse,
+  type FranchiseUser,
+  type Paged,
+  type User,
+  type Column,
+} from '@drivn-cook/shared';
 
-type Row = {
-  id:string; name:string; siren:string; contactEmail?:string|null; contactPhone?:string|null;
-  billingAddress?:string|null; defaultWarehouseId?:string|null; active:boolean; createdAt:string;
+import {
+  listFranchisees,
+  createFranchisee,
+  updateFranchisee,
+  deleteFranchisee,
+  listWarehouses,
+  listFranchiseUsers,
+  attachFranchiseUser,
+  updateFranchiseUser,
+  detachFranchiseUser,
+} from '../../services';
+
+import FranchiseeForm, { type FranchiseeFormValue } from './utils/FranchiseeForm';
+import FranchiseUsersManager from './utils/FranchiseUserManager';
+
+type Query = { search: string; onlyInactive: boolean; page: number; pageSize: number };
+
+const EMPTY_FORM: FranchiseeFormValue = {
+  name: '',
+  siren: '',
+  contactEmail: '',
+  contactPhone: '',
+  billingAddress: '',
+  defaultWarehouseId: '',
+  active: true,
 };
 
-type Paged<T> = { items:T[]; total:number; page:number; pageSize:number };
+export default function FranchiseesPage() {
+  // Query & listing
+  const [q, setQ] = useState<Query>({ search: '', onlyInactive: false, page: 1, pageSize: 20 });
+  const [items, setItems] = useState<Franchisee[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const pages = useMemo(() => Math.max(1, Math.ceil(total / q.pageSize)), [total, q.pageSize]);
 
-export default function FranchiseesPage(){
-  const [q,setQ] = useState({ search:'', onlyInactive:false, page:1, pageSize:20 });
-  const [items,setItems] = useState<Row[]>([]);
-  const [total,setTotal] = useState(0);
-  const [loading,setLoading] = useState(false);
+  // Modal
+  const [isOpen, setIsOpen] = useState(false);
+  const [editing, setEditing] = useState<Franchisee | null>(null);
+  const [form, setForm] = useState<FranchiseeFormValue>({ ...EMPTY_FORM });
 
-  const [isOpen,setIsOpen] = useState(false);
-  const [editing,setEditing] = useState<Row|null>(null);
-  const [form,setForm] = useState({ name:'', siren:'', contactEmail:'', contactPhone:'', billingAddress:'', defaultWarehouseId:'', active:true });
+  // Warehouses
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [whLoading, setWhLoading] = useState(false);
 
-  async function load(){
+  // Franchise users
+  const [fuLoading, setFuLoading] = useState(false);
+  const [franchiseUsers, setFranchiseUsers] = useState<FranchiseUser[]>([]);
+  const [attachUserForm, setAttachUserForm] = useState<{ userId: string; roleInFranchise: string }>({
+    userId: '',
+    roleInFranchise: 'STAFF',
+  });
+
+  // Debounces
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Loads */
+  async function loadList() {
     setLoading(true);
-    try{
-      const res = await api.get<Paged<Row>>('/franchisees', { params: { search:q.search||undefined, inactive:q.onlyInactive||undefined, page:q.page, pageSize:q.pageSize }});
-      setItems(res.data.items ?? []); setTotal(res.data.total ?? res.data.items?.length ?? 0);
-    } finally { setLoading(false); }
+    try {
+      const data = await listFranchisees({ q: q.search || undefined, page: q.page, pageSize: q.pageSize });
+      let list = data.items ?? [];
+      if (q.onlyInactive) list = list.filter((x) => !x.active);
+      setItems(list);
+      setTotal(q.onlyInactive ? list.length : data.total ?? list.length);
+    } finally {
+      setLoading(false);
+    }
   }
-  useEffect(()=>{ load(); /* eslint-disable-next-line */ }, [q.page, q.pageSize]);
 
-  const pages = useMemo(()=>Math.max(1, Math.ceil(total/q.pageSize)), [total, q.pageSize]);
+  async function loadWarehousesForSelect() {
+    setWhLoading(true);
+    try {
+      const data = await listWarehouses({ page: 1, pageSize: 100 });
+      setWarehouses(data.items ?? []);
+    } finally {
+      setWhLoading(false);
+    }
+  }
 
-  function openCreate(){ setEditing(null); setForm({ name:'', siren:'', contactEmail:'', contactPhone:'', billingAddress:'', defaultWarehouseId:'', active:true }); setIsOpen(true); }
-  function openEdit(f:Row){ setEditing(f); setForm({ name:f.name, siren:f.siren, contactEmail:f.contactEmail||'', contactPhone:f.contactPhone||'', billingAddress:f.billingAddress||'', defaultWarehouseId:f.defaultWarehouseId||'', active:f.active }); setIsOpen(true); }
+  async function loadFranchiseUsersFor(franchiseeId: string) {
+    setFuLoading(true);
+    try {
+      const data = await listFranchiseUsers(franchiseeId);
+      setFranchiseUsers(data.items ?? []);
+    } finally {
+      setFuLoading(false);
+    }
+  }
 
-  async function submit(e:React.FormEvent){
+  /** User search adapter for FranchiseUsersManager (uses shared API) */
+  async function searchUsersAdapter(q: string) {
+    const res = await api.get<Paged<User>>('/users', { params: { q: q || undefined, page: 1, pageSize: 20 } });
+    return (res.data.items ?? []).map((u) => ({
+      id: u.id,
+      email: u.email,
+      label: ((u.firstName ?? '') + ' ' + (u.lastName ?? '')).trim() || u.email,
+    }));
+  }
+
+  /** Effects */
+  useEffect(() => {
+    loadList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.page, q.pageSize]);
+
+  useEffect(() => {
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(() => {
+      setQ((p) => ({ ...p, page: 1 }));
+      loadList();
+    }, 300);
+    return () => {
+      if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.search, q.onlyInactive]);
+
+  /** Actions */
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...EMPTY_FORM });
+    setIsOpen(true);
+    loadWarehousesForSelect();
+    setFranchiseUsers([]);
+  }
+
+  async function openEdit(f: Franchisee) {
+    setEditing(f);
+    setForm({
+      name: f.name,
+      siren: f.siren,
+      contactEmail: f.contactEmail || '',
+      contactPhone: f.contactPhone || '',
+      billingAddress: f.billingAddress || '',
+      defaultWarehouseId: f.defaultWarehouseId || '',
+      active: f.active,
+    });
+    setIsOpen(true);
+    await Promise.all([loadWarehousesForSelect(), loadFranchiseUsersFor(f.id)]);
+  }
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     const payload = { ...form, defaultWarehouseId: form.defaultWarehouseId || undefined };
-    if (editing) await api.put(`/franchisees/${editing.id}`, payload);
-    else await api.post(`/franchisees`, payload);
-    setIsOpen(false); setQ(p=>({ ...p, page:1 })); await load();
+    if (editing) await updateFranchisee(editing.id, payload);
+    else await createFranchisee(payload);
+    setIsOpen(false);
+    setQ((p) => ({ ...p, page: 1 }));
+    await loadList();
   }
 
+  async function onDeleteFranchisee(id: string) {
+    if (!confirm('Supprimer définitivement ce franchisé ? Cette action est irréversible.')) return;
+    await deleteFranchisee(id);
+    if (editing?.id === id) setIsOpen(false);
+    if (q.page > 1 && items.length === 1) setQ((p) => ({ ...p, page: p.page - 1 }));
+    await loadList();
+  }
+
+  async function onChangeFranchiseUserRole(franchiseUserId: string, role: string) {
+    await updateFranchiseUser(franchiseUserId, { roleInFranchise: role || null });
+    if (editing) await loadFranchiseUsersFor(editing.id);
+  }
+
+  async function onDetachFranchiseUser(franchiseUserId: string) {
+    if (!confirm('Détacher cet utilisateur de la franchise ?')) return;
+    await detachFranchiseUser(franchiseUserId);
+    if (editing) await loadFranchiseUsersFor(editing.id);
+  }
+
+  async function onAttachFranchiseUser() {
+    if (!editing) return;
+    if (!attachUserForm.userId) return alert('Sélectionne un utilisateur');
+    await attachFranchiseUser({
+      userId: attachUserForm.userId,
+      franchiseeId: editing.id,
+      roleInFranchise: attachUserForm.roleInFranchise || null,
+    });
+    setAttachUserForm({ userId: '', roleInFranchise: 'STAFF' });
+    await loadFranchiseUsersFor(editing.id);
+  }
+
+  /** Columns for DataTable */
+  const columns: Column<Franchisee>[] = [
+    { header: 'Nom', render: (f) => f.name, getSortValue: (f) => f.name, width: 'min-w-[200px]' },
+    { header: 'SIREN', render: (f) => f.siren, getSortValue: (f) => f.siren, width: 'w-40' },
+    {
+      header: 'Contact',
+      render: (f) =>
+        f.contactEmail || f.contactPhone ? (
+          <div className="flex flex-col">
+            {f.contactEmail && <span>{f.contactEmail}</span>}
+            {f.contactPhone && <span className="opacity-70">{f.contactPhone}</span>}
+          </div>
+        ) : (
+          '—'
+        ),
+      getSortValue: (f) => f.contactEmail ?? '',
+      width: 'min-w-[220px]',
+    },
+    {
+      header: 'Entrepôt par défaut',
+      render: (f) => (f.defaultWarehouseId ? f.defaultWarehouseId.slice(0, 8) + '…' : '—'),
+      getSortValue: (f) => f.defaultWarehouseId ?? '',
+      width: 'w-48',
+    },
+    {
+      header: 'Actif',
+      render: (f) => (f.active ? 'Oui' : 'Non'),
+      getSortValue: (f) => (f.active ? 1 : 0),
+      align: 'center',
+      width: 'w-24',
+    },
+    {
+      header: 'Actions',
+      render: (f) => (
+        <div className="text-right space-x-3">
+          <button onClick={() => openEdit(f)} className="underline">Éditer</button>
+          <button onClick={() => onDeleteFranchisee(f.id)} className="text-red-600 underline">Supprimer</button>
+        </div>
+      ),
+      align: 'right',
+      width: 'w-48',
+    },
+  ];
+
+  /** Render */
   return (
     <section className="space-y-4">
       <header className="flex items-center gap-2">
         <h1 className="text-xl font-semibold">Franchisés</h1>
         <div className="ml-auto flex items-center gap-2">
-          <input value={q.search} onChange={e=>setQ(p=>({ ...p, search:e.target.value, page:1 }))} placeholder="nom / SIREN / email" className="border rounded px-2 py-1 text-sm"/>
-          <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={q.onlyInactive} onChange={e=>setQ(p=>({ ...p, onlyInactive:e.target.checked, page:1 }))}/> Inactifs</label>
-          <button onClick={openCreate} className="border rounded px-2 py-1 text-sm">Nouveau</button>
+          <input
+            value={q.search}
+            onChange={(e) => setQ((p) => ({ ...p, search: e.target.value }))}
+            placeholder="nom / SIREN / email"
+            className="border rounded px-2 py-1 text-sm"
+          />
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={q.onlyInactive}
+              onChange={(e) => setQ((p) => ({ ...p, onlyInactive: e.target.checked }))}
+            />{' '}
+            Inactifs
+          </label>
+          <button onClick={openCreate} className="border rounded px-2 py-1 text-sm">
+            Nouveau
+          </button>
         </div>
       </header>
 
-      <div className="text-sm opacity-70">{loading?'Chargement…':`Total: ${total}`}</div>
-
-      <div className="overflow-x-auto border rounded">
-        <table className="min-w-[1100px] w-full text-sm">
-          <thead className="bg-black/5"><tr>
-            <th className="text-left px-3 py-2">Nom</th>
-            <th className="text-left px-3 py-2">SIREN</th>
-            <th className="text-left px-3 py-2">Contact</th>
-            <th className="text-left px-3 py-2">Entrepôt par défaut</th>
-            <th className="text-left px-3 py-2">Actif</th>
-            <th className="text-right px-3 py-2">Actions</th>
-          </tr></thead>
-          <tbody>
-            {items.map(f=>(
-              <tr key={f.id} className="border-t">
-                <td className="px-3 py-2">{f.name}</td>
-                <td className="px-3 py-2">{f.siren}</td>
-                <td className="px-3 py-2">{f.contactEmail || f.contactPhone || '—'}</td>
-                <td className="px-3 py-2">{f.defaultWarehouseId ? f.defaultWarehouseId.slice(0,8)+'…' : '—'}</td>
-                <td className="px-3 py-2">{f.active ? 'Oui' : 'Non'}</td>
-                <td className="px-3 py-2 text-right">
-                  <button onClick={()=>openEdit(f)} className="underline">Éditer</button>
-                </td>
-              </tr>
-            ))}
-            {!loading && items.length===0 && <tr><td colSpan={6} className="px-3 py-6 text-center opacity-60">Aucun franchisé</td></tr>}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="flex items-center gap-2 justify-end">
-        <button disabled={q.page<=1} onClick={()=>setQ(p=>({ ...p, page: Math.max(1, p.page-1) }))} className="border rounded px-2 py-1 disabled:opacity-50">Précédent</button>
-        <span className="text-sm">Page {q.page} / {pages}</span>
-        <button disabled={q.page>=pages} onClick={()=>setQ(p=>({ ...p, page: Math.min(pages, p.page+1) }))} className="border rounded px-2 py-1 disabled:opacity-50">Suivant</button>
-      </div>
+      <DataTable
+        items={items}
+        columns={columns}
+        loading={loading}
+        page={q.page}
+        pageSize={q.pageSize}
+        total={total}
+        onPageChange={(p) => setQ((prev) => ({ ...prev, page: p }))}
+        minTableWidth="min-w-[1100px]"
+      />
 
       {/* Modal */}
-      {isOpen && (
-        <div className="fixed inset-0 bg-black/20 flex items-center justify-center p-4">
-          <div className="bg-white rounded shadow-md w-full max-w-2xl">
-            <form onSubmit={submit} className="p-4 space-y-3">
-              <h2 className="text-lg font-semibold">{editing?'Modifier le franchisé':'Nouveau franchisé'}</h2>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-sm mb-1">Nom</label><input value={form.name} onChange={e=>setForm({...form, name:e.target.value})} className="border rounded px-2 py-1 w-full"/></div>
-                <div><label className="block text-sm mb-1">SIREN</label><input value={form.siren} onChange={e=>setForm({...form, siren:e.target.value})} className="border rounded px-2 py-1 w-full"/></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-sm mb-1">Email</label><input value={form.contactEmail} onChange={e=>setForm({...form, contactEmail:e.target.value})} className="border rounded px-2 py-1 w-full"/></div>
-                <div><label className="block text-sm mb-1">Téléphone</label><input value={form.contactPhone} onChange={e=>setForm({...form, contactPhone:e.target.value})} className="border rounded px-2 py-1 w-full"/></div>
-              </div>
-              <div><label className="block text-sm mb-1">Adresse de facturation</label><input value={form.billingAddress} onChange={e=>setForm({...form, billingAddress:e.target.value})} className="border rounded px-2 py-1 w-full"/></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-sm mb-1">Default WarehouseId</label><input value={form.defaultWarehouseId} onChange={e=>setForm({...form, defaultWarehouseId:e.target.value})} className="border rounded px-2 py-1 w-full"/></div>
-                <label className="inline-flex items-center gap-2 text-sm self-end"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form, active:e.target.checked})}/> Actif</label>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={()=>setIsOpen(false)} className="border rounded px-3 py-1">Annuler</button>
-                <button type="submit" className="border rounded px-3 py-1">{editing?'Enregistrer':'Créer'}</button>
-              </div>
-            </form>
+      <Modal open={isOpen} onClose={() => setIsOpen(false)} maxWidth="max-w-3xl">
+        <form onSubmit={submit} className="p-4 space-y-4">
+          <div className="flex items-start">
+            <h2 className="text-lg font-semibold">
+              {editing ? 'Modifier le franchisé' : 'Nouveau franchisé'}
+            </h2>
+            {editing && (
+              <button
+                type="button"
+                onClick={() => onDeleteFranchisee(editing.id)}
+                className="ml-auto text-red-600 underline"
+              >
+                Supprimer ce franchisé
+              </button>
+            )}
           </div>
-        </div>
-      )}
+
+          <FranchiseeForm
+            value={form}
+            onChange={setForm}
+            warehouses={warehouses}
+            warehousesLoading={whLoading}
+          />
+
+          {editing && (
+            <FranchiseUsersManager
+              items={franchiseUsers}
+              loading={fuLoading}
+              onChangeRole={onChangeFranchiseUserRole}
+              onDetach={onDetachFranchiseUser}
+              attach={attachUserForm}
+              onAttachChange={(patch) => setAttachUserForm((p) => ({ ...p, ...patch }))}
+              onAttachSubmit={onAttachFranchiseUser}
+              searchUsers={searchUsersAdapter}
+            />
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setIsOpen(false)} className="border rounded px-3 py-1">
+              Annuler
+            </button>
+            <button type="submit" className="border rounded px-3 py-1">
+              {editing ? 'Enregistrer' : 'Créer'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </section>
   );
 }

@@ -23,7 +23,7 @@ export default function AuditLogPage() {
   async function load() {
     setLoading(true);
     try {
-      const res = await api.get<Paged<Row>>('/admin/audit-logs', {
+      const res = await api.get<Paged<Row>>('/audit-logs', {
         params: {
           action: q.action || undefined,
           entity: q.entity || undefined,

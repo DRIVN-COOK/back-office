@@ -20,7 +20,7 @@ export default function LoyaltyPage(){
   async function findCard(){
     setLoading(true);
     try{
-      const res = await api.get<Card|undefined>('/loyalty/cards/find', { params:{ q: search }});
+      const res = await api.get<Card|undefined>('/loyalty-cards/find', { params:{ q: search }});
       setCard(res.data ?? null);
       setPage(1);
     } finally { setLoading(false); }
@@ -30,7 +30,7 @@ export default function LoyaltyPage(){
     if (!card) { setTxns([]); setTotal(0); return; }
     setLoading(true);
     try{
-      const res = await api.get<Paged<Txn>>(`/loyalty/cards/${card.id}/transactions`, { params:{ page, pageSize }});
+      const res = await api.get<Paged<Txn>>(`/loyalty-transactions/${card.id}`, { params:{ page, pageSize }});
       setTxns(res.data.items ?? []); setTotal(res.data.total ?? res.data.items?.length ?? 0);
     } finally { setLoading(false); }
   }
@@ -41,7 +41,7 @@ export default function LoyaltyPage(){
   async function adjustPoints(e:React.FormEvent){
     e.preventDefault();
     if (!card) return;
-    await api.post(`/loyalty/cards/${card.id}/transactions`, form);
+    await api.post(`/loyalty-transactions/${card.id}`, form);
     setIsOpen(false); await findCard(); await loadTxns();
   }
 

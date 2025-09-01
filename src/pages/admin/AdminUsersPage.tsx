@@ -22,7 +22,7 @@ export default function AdminUsersPage() {
   async function load() {
     setLoading(true);
     try {
-      const res = await api.get<Paged<Row>>('/admin/users', {
+      const res = await api.get<Paged<Row>>('/users', {
         params: {
           search: q.search || undefined,
           role: q.role || undefined,
@@ -43,15 +43,15 @@ export default function AdminUsersPage() {
   const pages = useMemo(() => Math.max(1, Math.ceil(total / q.pageSize)), [total, q.pageSize]);
 
   async function setRole(u: Row, role: Role) {
-    await api.put(`/admin/users/${u.id}/role`, { role });
+    await api.put(`/users/${u.id}/role`, { role });
     await load();
   }
   async function setActive(u: Row, active: boolean) {
-    await api.put(`/admin/users/${u.id}/status`, { isActive: active });
+    await api.put(`/users/${u.id}/status`, { isActive: active });
     await load();
   }
   async function resetPassword(u: Row) {
-    await api.post(`/admin/users/${u.id}/reset-password`);
+    await api.post(`/users/${u.id}/reset-password`);
     alert('Si la fonctionnalité est branchée, un email de réinitialisation a été envoyé.');
   }
 
