@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth, setApiBaseUrl, setErrorNotifier } from '@drivn-cook/shared';
+import { AuthProvider, useAuth, setApiBaseUrl, setErrorNotifier, Role } from '@drivn-cook/shared';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { API_URL } from './config.js';
+setApiBaseUrl(API_URL);
 
 /* Pages */
 const HomePage = lazy(() => import('./pages/HomePage'));
@@ -29,12 +30,7 @@ const CreatePurchaseOrderPage = lazy(() => import('./pages/procurement/CreatePur
 const PurchaseOrderDetailPage = lazy(() => import('./pages/procurement/PurchaseOrderDetailPage'));
 
 const CustomerOrdersPage = lazy(() => import('./pages/sales/CustomerOrdersPage'));
-const PaymentsPage = lazy(() => import('./pages/sales/PaymentsPage'));
-const InvoicesPage = lazy(() => import('./pages/sales/InvoicesPage'));
 const OrderDetailPage = lazy(() => import('./pages/sales/OrderDetailPage'));
-
-const LoyaltyPage = lazy(() => import('./pages/loyalty/LoyaltyPage'));
-const EventsPage = lazy(() => import('./pages/events/EventsPage'));
 
 const ReportingPage = lazy(() => import('./pages/reporting/ReportingPage'));
 const RoyaltiesPage = lazy(() => import('./pages/reporting/RoyaltiesPage'));
@@ -48,6 +44,7 @@ import AdminLayout from './layouts/AdminLayout';
 /* Guard */
 function AdminRoute({ children }: { children: JSX.Element }) {
   const { user, isLoading } = useAuth();
+
   if (isLoading) {
     return (
       <div className="min-h-screen grid place-items-center">
@@ -55,8 +52,12 @@ function AdminRoute({ children }: { children: JSX.Element }) {
       </div>
     );
   }
+
   if (!user) return <Navigate to="/login" replace />;
-  if (!['ADMIN', 'HQ_STAFF'].includes(user.role)) return <Navigate to="/login" replace />;
+
+  const ALLOWED_ROLES: readonly Role[] = [Role.ADMIN, Role.HQ_STAFF] as const;
+  if (!ALLOWED_ROLES.includes(user.role)) return <Navigate to="/login" replace />;
+
   return children;
 }
 
@@ -104,15 +105,13 @@ export default function App() {
           <Routes>
             {/* Auth publiques */}
             <Route path="/login" element={<LoginPage />} />
-
-            <Route path="/" element={<Navigate to="/login" replace />} />
               
             {/* Admin protégées */}
             <Route element={<AdminRoute><AdminLayout /></AdminRoute>}>
               <Route index element={<HomePage />} />
 
               {/* Franchise */}
-              <Route path="franchisees" element={<FranchiseesPage />} />
+              <Route path="franchises" element={<FranchiseesPage />} />
               <Route path="agreements" element={<AgreementsPage />} />
 
               {/* Camions */}
@@ -139,12 +138,6 @@ export default function App() {
               {/* Ventes */}
               <Route path="customer-orders" element={<CustomerOrdersPage />} />
               <Route path="customer-orders/:id" element={<OrderDetailPage />} />
-              <Route path="payments" element={<PaymentsPage />} />
-              <Route path="invoices" element={<InvoicesPage />} />
-
-              {/* Fidélité & évènements */}
-              <Route path="loyalty" element={<LoyaltyPage />} />
-              <Route path="events" element={<EventsPage />} />
 
               {/* Reporting */}
               <Route path="reporting" element={<ReportingPage />} />
@@ -155,7 +148,7 @@ export default function App() {
               <Route path="admin/audit" element={<AuditLogPage />} />
             </Route>
 
-            <Route path="*" element={<Navigate to="/login" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
       </BrowserRouter>

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   api,
   Modal,
   DataTable,
+  type FranchiseRole,
   type Franchisee,
   type Warehouse,
   type FranchiseUser,
@@ -57,10 +58,13 @@ export default function FranchiseesPage() {
   // Franchise users
   const [fuLoading, setFuLoading] = useState(false);
   const [franchiseUsers, setFranchiseUsers] = useState<FranchiseUser[]>([]);
-  const [attachUserForm, setAttachUserForm] = useState<{ userId: string; roleInFranchise: string }>({
-    userId: '',
-    roleInFranchise: 'STAFF',
-  });
+  const [attachUserForm, setAttachUserForm] = useState<{
+  userId: string;
+  roleInFranchise: '' | FranchiseRole;
+}>({
+  userId: '',
+  roleInFranchise: 'STAFF' as FranchiseRole,
+});
 
   // Debounces
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,6 +112,18 @@ export default function FranchiseesPage() {
       label: ((u.firstName ?? '') + ' ' + (u.lastName ?? '')).trim() || u.email,
     }));
   }
+
+  function handleManagerChangeRole(franchiseUserId: string, roleStr: string): void {
+  const role = (roleStr || '') as '' | FranchiseRole;
+  void onChangeFranchiseUserRole(franchiseUserId, role); // on ignore la Promise
+}
+
+function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }): void {
+  setAttachUserForm(prev => ({
+    userId: patch.userId ?? prev.userId,
+    roleInFranchise: (patch.roleInFranchise ?? prev.roleInFranchise) as '' | FranchiseRole,
+  }));
+}
 
   /** Effects */
   useEffect(() => {
@@ -162,17 +178,18 @@ export default function FranchiseesPage() {
   }
 
   async function onDeleteFranchisee(id: string) {
-    if (!confirm('Supprimer définitivement ce franchisé ? Cette action est irréversible.')) return;
+    if (!confirm('Supprimer définitivement cette franchise ? Cette action est irréversible.')) return;
     await deleteFranchisee(id);
     if (editing?.id === id) setIsOpen(false);
     if (q.page > 1 && items.length === 1) setQ((p) => ({ ...p, page: p.page - 1 }));
     await loadList();
   }
 
-  async function onChangeFranchiseUserRole(franchiseUserId: string, role: string) {
-    await updateFranchiseUser(franchiseUserId, { roleInFranchise: role || null });
-    if (editing) await loadFranchiseUsersFor(editing.id);
-  }
+  async function onChangeFranchiseUserRole(franchiseUserId: string, role: '' | FranchiseRole) {
+  const payload = role ? { roleInFranchise: role as FranchiseRole } : {}; 
+  await updateFranchiseUser(franchiseUserId, payload);
+  if (editing) await loadFranchiseUsersFor(editing.id);
+}
 
   async function onDetachFranchiseUser(franchiseUserId: string) {
     if (!confirm('Détacher cet utilisateur de la franchise ?')) return;
@@ -181,16 +198,20 @@ export default function FranchiseesPage() {
   }
 
   async function onAttachFranchiseUser() {
-    if (!editing) return;
-    if (!attachUserForm.userId) return alert('Sélectionne un utilisateur');
-    await attachFranchiseUser({
-      userId: attachUserForm.userId,
-      franchiseeId: editing.id,
-      roleInFranchise: attachUserForm.roleInFranchise || null,
-    });
-    setAttachUserForm({ userId: '', roleInFranchise: 'STAFF' });
-    await loadFranchiseUsersFor(editing.id);
-  }
+  if (!editing) return;
+  if (!attachUserForm.userId) return alert('Sélectionne un utilisateur');
+
+  const payload = {
+    userId: attachUserForm.userId,
+    franchiseeId: editing.id,
+    ...(attachUserForm.roleInFranchise
+      ? { roleInFranchise: attachUserForm.roleInFranchise as FranchiseRole }
+      : {}),
+  };
+  await attachFranchiseUser(payload);
+  setAttachUserForm({ userId: '', roleInFranchise: 'STAFF' as FranchiseRole });
+  await loadFranchiseUsersFor(editing.id);
+}
 
   /** Columns for DataTable */
   const columns: Column<Franchisee>[] = [
@@ -240,12 +261,12 @@ export default function FranchiseesPage() {
   return (
     <section className="space-y-4">
       <header className="flex items-center gap-2">
-        <h1 className="text-xl font-semibold">Franchisés</h1>
+        <h1 className="text-xl font-semibold">Franchises</h1>
         <div className="ml-auto flex items-center gap-2">
           <input
             value={q.search}
             onChange={(e) => setQ((p) => ({ ...p, search: e.target.value }))}
-            placeholder="nom / SIREN / email"
+            placeholder="nom / SIREN"
             className="border rounded px-2 py-1 text-sm"
           />
           <label className="inline-flex items-center gap-2 text-sm">
@@ -275,21 +296,20 @@ export default function FranchiseesPage() {
 
       {/* Modal */}
       <Modal open={isOpen} onClose={() => setIsOpen(false)} maxWidth="max-w-3xl">
+        <div className="max-h-[calc(100vh-2rem)] z-50 overflow-y-auto min-h-0">
         <form onSubmit={submit} className="p-4 space-y-4">
-          <div className="flex items-start">
-            <h2 className="text-lg font-semibold">
-              {editing ? 'Modifier le franchisé' : 'Nouveau franchisé'}
-            </h2>
-            {editing && (
-              <button
-                type="button"
-                onClick={() => onDeleteFranchisee(editing.id)}
-                className="ml-auto text-red-600 underline"
-              >
-                Supprimer ce franchisé
-              </button>
-            )}
-          </div>
+            <div className="bg-white pt-4 pb-3 -mt-4 -mx-4 px-4 border-b">
+              <div className="flex items-start">
+                <h2 className="text-lg font-semibold">
+                  {editing ? 'Modifier la franchise' : 'Nouvelle franchise'}
+                </h2>
+                {editing && (
+                  <button type="button" onClick={() => onDeleteFranchisee(editing.id)} className="ml-auto text-red-600 underline">
+                    Supprimer cette franchise
+                  </button>
+                )}
+              </div>
+            </div>
 
           <FranchiseeForm
             value={form}
@@ -302,24 +322,21 @@ export default function FranchiseesPage() {
             <FranchiseUsersManager
               items={franchiseUsers}
               loading={fuLoading}
-              onChangeRole={onChangeFranchiseUserRole}
+              onChangeRole={handleManagerChangeRole}       
               onDetach={onDetachFranchiseUser}
-              attach={attachUserForm}
-              onAttachChange={(patch) => setAttachUserForm((p) => ({ ...p, ...patch }))}
+              attach={attachUserForm}                       
+              onAttachChange={handleAttachChange}           
               onAttachSubmit={onAttachFranchiseUser}
               searchUsers={searchUsersAdapter}
             />
           )}
 
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setIsOpen(false)} className="border rounded px-3 py-1">
-              Annuler
-            </button>
-            <button type="submit" className="border rounded px-3 py-1">
-              {editing ? 'Enregistrer' : 'Créer'}
-            </button>
-          </div>
-        </form>
+           <div className="sticky bottom-0 z-10 bg-white pt-3 pb-4 -mb-4 -mx-4 px-4 border-t flex justify-end gap-2">
+          <button type="button" onClick={() => setIsOpen(false)} className="border rounded px-3 py-1">Annuler</button>
+          <button type="submit" className="border rounded px-3 py-1">{editing ? 'Enregistrer' : 'Créer'}</button>
+        </div>
+      </form>
+      </div>
       </Modal>
     </section>
   );

@@ -1,5 +1,5 @@
-// back-office/src/pages/trucks/MaintenancePage.tsx
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import {
   DataTable,
   Modal,
@@ -7,10 +7,11 @@ import {
   MaintenanceType,
   MaintenanceStatus,
   maintenanceCreateSchema,
+  type Truck,
 } from '@drivn-cook/shared';
+import { listMaintenances, createMaintenance, updateMaintenance, listTrucks } from '../../services';
 
-// On part du principe que ces services existent déjà côté back-office.
-import { listMaintenances, createMaintenance, updateMaintenance } from '../../services';
+type TruckOption = { id: string; label: string };
 
 type Row = {
   id: string;
@@ -19,7 +20,7 @@ type Row = {
   status: MaintenanceStatus;
   scheduledAt?: string | null;
   completedAt?: string | null;
-  cost?: string | null; // decimal string
+  cost?: string | null;
   notes?: string | null;
   truck?: { plateNumber: string };
   createdAt: string;
@@ -29,14 +30,26 @@ type FormShape = {
   truckId: string;
   type: MaintenanceType;
   status: MaintenanceStatus;
-  scheduledAt: string;  // ISO or ''
-  completedAt: string;  // ISO or ''
-  cost: string;         // decimal string or ''
+  scheduledAt: string;  // ISO ou ''
+  completedAt: string;  // ISO ou ''
+  cost: string;         // chaîne décimale ou ''
   notes: string;
 };
 
 const TYPE_OPTIONS = Object.values(MaintenanceType) as MaintenanceType[];
 const STATUS_OPTIONS = Object.values(MaintenanceStatus) as MaintenanceStatus[];
+
+// Libellés FR
+const TYPE_LABELS: Record<MaintenanceType, string> = {
+  SERVICE: 'Entretien',
+  REPAIR: 'Réparation',
+  INSPECTION: 'Inspection',
+};
+const STATUS_LABELS: Record<MaintenanceStatus, string> = {
+  PLANNED: 'Planifié',
+  IN_PROGRESS: 'En cours',
+  DONE: 'Terminé',
+};
 
 const EMPTY_FORM: FormShape = {
   truckId: '',
@@ -48,21 +61,28 @@ const EMPTY_FORM: FormShape = {
   notes: '',
 };
 
-const toLocal = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
+const toLocal = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('fr-FR') : '—');
 
+// N’envoie scheduledAt/completedAt que si cohérent avec le statut
 function normalizeForm(f: FormShape) {
   return {
     truckId: f.truckId.trim(),
     type: f.type,
     status: f.status,
-    scheduledAt: f.scheduledAt ? f.scheduledAt : undefined,
-    completedAt: f.completedAt ? f.completedAt : undefined,
+    scheduledAt: f.status === MaintenanceStatus.PLANNED && f.scheduledAt ? f.scheduledAt : undefined,
+    completedAt: f.status === MaintenanceStatus.DONE && f.completedAt ? f.completedAt : undefined,
     cost: f.cost.trim() ? f.cost.trim() : undefined,
     notes: f.notes.trim() ? f.notes.trim() : undefined,
   };
 }
 
 export default function MaintenancePage() {
+  const navigate = useNavigate();
+  const [sp] = useSearchParams();
+  // supporte /maintenance?truckId=... et /trucks/:truckId/maintenance
+  const paramTruckId = sp.get('truckId') || (useParams() as any)?.truckId || '';
+  const fixedTruckId = paramTruckId || '';
+
   const [items, setItems] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<MaintenanceStatus | 'ALL'>('ALL');
@@ -71,13 +91,20 @@ export default function MaintenancePage() {
   const [total, setTotal] = useState(0);
 
   const [isOpen, setIsOpen] = useState(false);
-  const [form, setForm] = useState<FormShape>({ ...EMPTY_FORM });
+  const [form, setForm] = useState<FormShape>({ ...EMPTY_FORM, truckId: fixedTruckId });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Select camion (recherche)
+  const [truckSearch, setTruckSearch] = useState('');
+  const [truckOptions, setTruckOptions] = useState<Array<{ id: string; label: string }>>([]);
+  const [truckLoading, setTruckLoading] = useState(false);
+
+  // ---- Data ----
   async function load() {
     setLoading(true);
     try {
       const data = await listMaintenances({
+        truckId: fixedTruckId || undefined,
         status: status === 'ALL' ? undefined : status,
         page,
         pageSize,
@@ -93,20 +120,50 @@ export default function MaintenancePage() {
     }
   }
 
+  async function searchTrucks(term: string) {
+  setTruckLoading(true);
+  try {
+    const data = await listTrucks({ search: term || undefined, page: 1, pageSize: 50 });
+
+    const items = (data.items ?? []) as Truck[]; // <- on tape la collection
+    const opts: TruckOption[] = items
+      .map((t) => ({
+        id: t.id,
+        label: t.plateNumber ? `${t.plateNumber} — ${t.vin}` : t.vin,
+      }))
+      .sort((a: TruckOption, b: TruckOption) =>
+        a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' })
+      );
+
+    setTruckOptions(opts);
+  } finally {
+    setTruckLoading(false);
+  }
+}
+
+  // ---- Effects ----
+  useEffect(() => { searchTrucks(''); }, []);
+  useEffect(() => {
+    const id = setTimeout(() => { searchTrucks(truckSearch); }, 300);
+    return () => clearTimeout(id);
+  }, [truckSearch]);
+
+  useEffect(() => {
+    setForm((f) => ({ ...f, truckId: fixedTruckId })); // pré-remplit pour la création
+  }, [fixedTruckId]);
+
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, page, pageSize]);
+  }, [fixedTruckId, status, page, pageSize]);
 
-  const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
-
+  // ---- Submit ----
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErrors({});
     try {
-      // On évite les conversions aller-retour sur datetime-local:
-      // - On stocke directement la valeur du <input type="datetime-local"> en ISO dans form.*
       const payload = normalizeForm(form);
+      if (fixedTruckId) payload.truckId = fixedTruckId; // sécurité
       maintenanceCreateSchema.parse(payload);
       await createMaintenance(payload);
       setIsOpen(false);
@@ -120,52 +177,65 @@ export default function MaintenancePage() {
         });
         setErrors(map);
       } else {
-        alert('Erreur création maintenance');
+        alert("Erreur lors de la création de la maintenance.");
         console.error(err);
       }
     }
   }
 
+  // ---- Changement de statut (actions sur ligne) ----
   async function advanceStatus(id: string, next: MaintenanceStatus) {
     const snapshot = [...items];
+    const nowIso = new Date().toISOString();
+
+    // Optimistic UI
     setItems((list) =>
       list.map((x) =>
         x.id === id
           ? {
               ...x,
               status: next,
-              completedAt: next === MaintenanceStatus.DONE ? new Date().toISOString() : x.completedAt,
+              completedAt: next === MaintenanceStatus.DONE ? nowIso : x.completedAt,
             }
-          : x,
-      ),
+          : x
+      )
     );
+
     try {
-      await updateMaintenance(id, { status: next });
+      await updateMaintenance(
+        id,
+        next === MaintenanceStatus.DONE
+          ? { status: next, completedAt: nowIso }
+          : { status: next }
+      );
     } catch (e) {
       console.error(e);
       setItems(snapshot);
-      alert('Maj statut impossible');
+      alert("Impossible de mettre à jour le statut.");
     }
   }
 
-  // Colonnes DataTable
+  // ---- Colonnes ----
   const columns: Column<Row>[] = [
-    {
-      header: 'Camion',
-      render: (m) => m.truck?.plateNumber ?? m.truckId,
-      getSortValue: (m) => m.truck?.plateNumber ?? m.truckId,
-      width: 'w-40',
-    },
+    ...(fixedTruckId
+      ? []
+      : [{
+          header: 'Camion',
+          render: (m: Row) => m.truck?.plateNumber ?? m.truckId,
+          getSortValue: (m: Row) => m.truck?.plateNumber ?? m.truckId,
+          width: 'w-40',
+        } as Column<Row>]
+    ),
     {
       header: 'Type',
-      render: (m) => m.type,
-      getSortValue: (m) => TYPE_OPTIONS.indexOf(m.type),
+      render: (m) => TYPE_LABELS[m.type],
+      getSortValue: (m) => TYPE_LABELS[m.type],
       width: 'w-40',
     },
     {
       header: 'Statut',
-      render: (m) => m.status,
-      getSortValue: (m) => STATUS_OPTIONS.indexOf(m.status),
+      render: (m) => STATUS_LABELS[m.status],
+      getSortValue: (m) => STATUS_LABELS[m.status],
       width: 'w-40',
     },
     {
@@ -224,29 +294,25 @@ export default function MaintenancePage() {
   return (
     <section className="space-y-4">
       <header className="flex items-center gap-2">
-        <h1 className="text-xl font-semibold">Maintenance & Pannes</h1>
+        <div className="flex items-center gap-2">
+          <button onClick={() => navigate(-1)} className="border rounded px-2 py-1 text-sm">← Retour</button>
+          <h1 className="text-xl font-semibold">
+            Carnet d’entretien {fixedTruckId ? `— Camion #${fixedTruckId.slice(0,8)}…` : ''}
+          </h1>
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <select
             value={status}
-            onChange={(e) => {
-              setPage(1);
-              setStatus(e.target.value as MaintenanceStatus | 'ALL');
-            }}
+            onChange={(e) => { setPage(1); setStatus(e.target.value as MaintenanceStatus | 'ALL'); }}
             className="border rounded px-2 py-1 text-sm"
           >
-            <option value="ALL">Tous statuts</option>
+            <option value="ALL">Tous les statuts</option>
             {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
+              <option key={s} value={s}>{STATUS_LABELS[s]}</option>
             ))}
           </select>
           <button
-            onClick={() => {
-              setErrors({});
-              setForm({ ...EMPTY_FORM });
-              setIsOpen(true);
-            }}
+            onClick={() => { setErrors({}); setForm({ ...EMPTY_FORM, truckId: fixedTruckId }); setIsOpen(true); }}
             className="border rounded px-2 py-1 text-sm"
           >
             Nouvelle fiche
@@ -254,7 +320,7 @@ export default function MaintenancePage() {
         </div>
       </header>
 
-      <div className="text-sm opacity-70">{loading ? 'Chargement…' : `Total: ${total}`}</div>
+      <div className="text-sm opacity-70">{loading ? 'Chargement…' : `Total : ${total}`}</div>
 
       <DataTable<Row>
         items={items}
@@ -267,42 +333,46 @@ export default function MaintenancePage() {
         minTableWidth="min-w-[1000px]"
       />
 
-      {/* Pagination secondaire (facultative) */}
-      <div className="flex items-center gap-2 justify-end">
-        <button
-          disabled={page <= 1}
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-          className="border rounded px-2 py-1 disabled:opacity-50"
-        >
-          Précédent
-        </button>
-        <span className="text-sm">
-          Page {page} / {pages}
-        </span>
-        <button
-          disabled={page >= pages}
-          onClick={() => setPage((p) => Math.min(pages, p + 1))}
-          className="border rounded px-2 py-1 disabled:opacity-50"
-        >
-          Suivant
-        </button>
-      </div>
-
-      {/* Modal nouvelle maintenance */}
       <Modal open={isOpen} onClose={() => setIsOpen(false)} maxWidth="max-w-lg">
         <form onSubmit={submit} className="p-4 space-y-3">
           <h2 className="text-lg font-semibold">Nouvelle maintenance / panne</h2>
 
-          <div>
-            <label className="block text-sm mb-1">TruckId</label>
-            <input
-              value={form.truckId}
-              onChange={(e) => setForm({ ...form, truckId: e.target.value })}
-              className="border rounded px-2 py-1 w-full"
-            />
-            {errors.truckId && <p className="text-xs text-red-600">{errors.truckId}</p>}
-          </div>
+          {/* Sélection camion */}
+          {fixedTruckId ? (
+            <div>
+              <label className="block text-sm mb-1">Camion</label>
+              <div className="text-sm px-2 py-1 border rounded bg-gray-50">
+                {items?.[0]?.truck?.plateNumber
+                  ? `${items[0].truck.plateNumber} — ${fixedTruckId.slice(0,8)}…`
+                  : `#${fixedTruckId.slice(0,8)}…`}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm mb-1">Camion</label>
+              <input
+                value={truckSearch}
+                onChange={(e) => setTruckSearch(e.target.value)}
+                placeholder="Rechercher (plaque / VIN)…"
+                className="border rounded px-2 py-1 w-full mb-2"
+              />
+              <select
+                value={form.truckId}
+                onChange={(e) => setForm({ ...form, truckId: e.target.value })}
+                className="border rounded px-2 py-1 w-full"
+                required
+              >
+                <option value="">— Sélectionner —</option>
+                {truckOptions.map((t) => (
+                  <option key={t.id} value={t.id}>{t.label}</option>
+                ))}
+              </select>
+              {truckLoading && <span className="text-xs opacity-60">Chargement…</span>}
+              {errors.truckId && <p className="text-xs text-red-600">{errors.truckId}</p>}
+            </div>
+          )}
 
+          {/* Type & Statut */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm mb-1">Type</label>
@@ -312,60 +382,71 @@ export default function MaintenancePage() {
                 className="border rounded px-2 py-1 w-full"
               >
                 {TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
+                  <option key={t} value={t}>{TYPE_LABELS[t]}</option>
                 ))}
               </select>
             </div>
-
             <div>
               <label className="block text-sm mb-1">Statut</label>
               <select
                 value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value as MaintenanceStatus })}
+                onChange={(e) => {
+                  const next = e.target.value as MaintenanceStatus;
+                  setForm(prev => ({
+                    ...prev,
+                    status: next,
+                    // si on quitte PLANNED/DONE, on efface la date correspondante
+                    scheduledAt: next === MaintenanceStatus.PLANNED ? prev.scheduledAt : '',
+                    completedAt: next === MaintenanceStatus.DONE ? prev.completedAt : '',
+                  }));
+                }}
                 className="border rounded px-2 py-1 w-full"
               >
                 {STATUS_OPTIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
+                  <option key={s} value={s}>{STATUS_LABELS[s]}</option>
                 ))}
               </select>
             </div>
           </div>
 
+          {/* Dates conditionnelles */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm mb-1">Planifié</label>
-              <input
-                type="datetime-local"
-                value={form.scheduledAt ? new Date(form.scheduledAt).toISOString().slice(0, 16) : ''}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    scheduledAt: e.target.value ? new Date(e.target.value).toISOString() : '',
-                  })
-                }
-                className="border rounded px-2 py-1 w-full"
-              />
-            </div>
-            <div>
-              <label className="block text-sm mb-1">Terminé (optionnel)</label>
-              <input
-                type="datetime-local"
-                value={form.completedAt ? new Date(form.completedAt).toISOString().slice(0, 16) : ''}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    completedAt: e.target.value ? new Date(e.target.value).toISOString() : '',
-                  })
-                }
-                className="border rounded px-2 py-1 w-full"
-              />
-            </div>
+            {form.status === MaintenanceStatus.PLANNED && (
+              <div>
+                <label className="block text-sm mb-1">Planifié pour</label>
+                <input
+                  type="datetime-local"
+                  value={form.scheduledAt ? new Date(form.scheduledAt).toISOString().slice(0, 16) : ''}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      scheduledAt: e.target.value ? new Date(e.target.value).toISOString() : '',
+                    })
+                  }
+                  className="border rounded px-2 py-1 w-full"
+                />
+              </div>
+            )}
+
+            {form.status === MaintenanceStatus.DONE && (
+              <div>
+                <label className="block text-sm mb-1">Terminé le</label>
+                <input
+                  type="datetime-local"
+                  value={form.completedAt ? new Date(form.completedAt).toISOString().slice(0, 16) : ''}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      completedAt: e.target.value ? new Date(e.target.value).toISOString() : '',
+                    })
+                  }
+                  className="border rounded px-2 py-1 w-full"
+                />
+              </div>
+            )}
           </div>
 
+          {/* Coût & Notes */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm mb-1">Coût (HT)</label>

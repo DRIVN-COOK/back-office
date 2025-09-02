@@ -9,16 +9,22 @@ import {
 import {
   listFranchiseAgreements,
   createFranchiseAgreement,
-  listFranchisees
+  listFranchisees,
+  downloadFranchiseAgreementPdf,
+  deleteFranchiseAgreement,
 } from '../../services';
 
 type Query = { franchiseeId: string; page: number; pageSize: number };
 
+// Valeurs fixes (non modifiables dans l'UI)
+const FIXED_ENTRY_FEE = '50000.00';
+const FIXED_REVENUE_PCT = '0.0400';
+
 const EMPTY_FORM = {
   startDate: '',
   endDate: '',
-  entryFeeAmount: '50000.00',
-  revenueSharePct: '0.0400',
+  entryFeeAmount: FIXED_ENTRY_FEE,
+  revenueSharePct: FIXED_REVENUE_PCT,
   notes: '',
 };
 
@@ -37,10 +43,17 @@ export default function AgreementsPage() {
   const [franchiseeLoading, setFranchiseeLoading] = useState(false);
   const franchiseeSearchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  function currentFranchiseeName(): string {
+    const f = franchiseeOptions.find(o => o.id === q.franchiseeId);
+    return f?.name ?? 'franchise';
+    }
+
   async function load() {
     if (!q.franchiseeId) {
-      setItems([]);
-      setTotal(0);
+      setItems([]); setTotal(0);
       return;
     }
     setLoading(true);
@@ -57,23 +70,43 @@ export default function AgreementsPage() {
     }
   }
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q.franchiseeId, q.page, q.pageSize]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [q.franchiseeId, q.page, q.pageSize]);
 
+  // Création avec validations (fin >= début)
   async function onCreateAgreement(e: React.FormEvent) {
     e.preventDefault();
     if (!q.franchiseeId) return;
+
+    const start = Date.parse(form.startDate);
+    if (Number.isNaN(start)) return alert("Date de début invalide (format ISO attendu: YYYY-MM-DD)");
+
+    let endOrUndefined: string | undefined = undefined;
+    if (form.endDate) {
+      const end = Date.parse(form.endDate);
+      if (Number.isNaN(end)) return alert("Date de fin invalide (format ISO attendu: YYYY-MM-DD)");
+      if (end < start) return alert("La date de fin ne peut pas être antérieure à la date de début.");
+      endOrUndefined = form.endDate;
+    }
+
     const payload = {
-      ...form,
       franchiseeId: q.franchiseeId,
-      endDate: form.endDate || undefined,
+      startDate: form.startDate,
+      endDate: endOrUndefined,
+      // Valeurs figées côté UI (peuvent aussi être imposées côté API)
+      entryFeeAmount: FIXED_ENTRY_FEE,
+      revenueSharePct: FIXED_REVENUE_PCT,
+      notes: form.notes || undefined,
     };
-    await createFranchiseAgreement(payload);
-    setIsOpen(false);
-    setForm({ ...EMPTY_FORM });
-    await load();
+
+    try {
+      await createFranchiseAgreement(payload);
+      setIsOpen(false);
+      setForm({ ...EMPTY_FORM });
+      await load();
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de la création du contrat.");
+    }
   }
 
   useEffect(() => {
@@ -81,16 +114,13 @@ export default function AgreementsPage() {
     franchiseeSearchDebounce.current = setTimeout(() => {
       searchFranchisees(franchiseeSearch);
     }, 300);
-    return () => {
-      if (franchiseeSearchDebounce.current) clearTimeout(franchiseeSearchDebounce.current);
-    };
+    return () => { if (franchiseeSearchDebounce.current) clearTimeout(franchiseeSearchDebounce.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [franchiseeSearch]);
 
   async function searchFranchisees(term: string) {
-  setFranchiseeLoading(true);
+    setFranchiseeLoading(true);
     try {
-      // on limite à 50 et on trie par nom côté client
       const data = await listFranchisees({ q: term || undefined, page: 1, pageSize: 50 });
       const opts = (data.items ?? [])
         .map(f => ({ id: f.id, name: f.name }))
@@ -101,66 +131,110 @@ export default function AgreementsPage() {
     }
   }
 
+  function filenameFor(a: FranchiseAgreement) {
+    const start = new Date(a.startDate);
+    const y = start.getFullYear();
+    const m = String(start.getMonth()+1).padStart(2,'0');
+    const d = String(start.getDate()).padStart(2,'0');
+    const base = currentFranchiseeName().replace(/[^\p{L}\p{N}\-_.\s]/gu,'').trim().replace(/\s+/g,'_');
+    return `Contrat_${base}_${y}-${m}-${d}.pdf`;
+  }
+
+  async function onDownloadPdf(a: FranchiseAgreement) {
+    if (!q.franchiseeId) return;
+    setDownloadingId(a.id);
+    try {
+      await downloadFranchiseAgreementPdf({
+        franchiseeId: q.franchiseeId,
+        agreementId: a.id,
+        filename: filenameFor(a),
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Impossible de télécharger le PDF du contrat.");
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  async function onDelete(a: FranchiseAgreement) {
+    if (!q.franchiseeId) return;
+    if (!confirm("Supprimer ce contrat ? Cette action est définitive.")) return;
+    setDeletingId(a.id);
+    try {
+      await deleteFranchiseAgreement({ franchiseeId: q.franchiseeId, agreementId: a.id });
+      await load();
+    } catch (err) {
+      console.error(err);
+      alert("Suppression impossible.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  // Table réduite : une seule colonne 'Contrat (PDF)' triable par date de début + actions
   const columns: Column<FranchiseAgreement>[] = [
-    {
-      header: 'Début',
-      render: (a) => new Date(a.startDate).toLocaleDateString(),
-      getSortValue: (a) => new Date(a.startDate).getTime(),
-      width: 'w-36',
-    },
-    {
-      header: 'Fin',
-      render: (a) => (a.endDate ? new Date(a.endDate).toLocaleDateString() : '—'),
-      getSortValue: (a) => (a.endDate ? new Date(a.endDate).getTime() : 0),
-      width: 'w-36',
-    },
-    {
-      header: "Droit d'entrée (€)",
-      render: (a) => a.entryFeeAmount,
-      getSortValue: (a) => Number(a.entryFeeAmount),
-      width: 'w-40',
-      align: 'right',
-      thClassName: 'pr-4',
-      className: 'pr-4',
-    },
-    {
-      header: 'Redevance (%)',
-      render: (a) => `${(Number(a.revenueSharePct) * 100).toFixed(2)}%`,
-      getSortValue: (a) => Number(a.revenueSharePct),
-      width: 'w-36',
-      align: 'right',
-    },
-    {
-      header: 'Notes',
-      render: (a) => a.notes || '—',
-      getSortValue: (a) => a.notes?.length ?? 0,
-      width: 'min-w-[240px]',
-    },
-    {
-      header: 'Créé le',
-      render: (a) => new Date(a.createdAt).toLocaleString(),
-      getSortValue: (a) => new Date(a.createdAt).getTime(),
-      width: 'w-48',
-    },
-  ];
+  {
+    header: 'Début',
+    render: (a) => new Date(a.startDate).toLocaleDateString('fr-FR'),
+    getSortValue: (a) => new Date(a.startDate).getTime(),
+    width: 'w-32',
+  },
+  {
+    header: 'Fin',
+    render: (a) => (a.endDate ? new Date(a.endDate).toLocaleDateString('fr-FR') : '—'),
+    getSortValue: (a) => (a.endDate ? new Date(a.endDate).getTime() : Number.MAX_SAFE_INTEGER),
+    width: 'w-32',
+  },
+  {
+    header: 'Contrat (PDF)',
+    render: (a) => (
+      <button
+        onClick={() => onDownloadPdf(a)}
+        disabled={downloadingId === a.id}
+        className="underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
+        title="Télécharger le contrat (PDF)"
+      >
+        Télécharger le PDF
+      </button>
+    ),
+    getSortValue: (a) => new Date(a.startDate).getTime(),
+    width: 'w-[200px]',
+  },
+  {
+    header: 'Actions',
+    render: (a) => (
+      <button
+        onClick={() => onDelete(a)}
+        disabled={deletingId === a.id}
+        className="border rounded px-2 py-1 text-sm hover:bg-red-50 disabled:opacity-50"
+        title="Supprimer le contrat"
+      >
+        Supprimer
+      </button>
+    ),
+    width: 'w-28',
+    align: 'right',
+  },
+];
 
   return (
     <section className="space-y-4">
       <header className="flex items-center gap-2">
         <h1 className="text-xl font-semibold">Accords (franchisé)</h1>
         <div className="ml-auto flex items-center gap-2">
-  {/* recherche par nom */}
-  <input
-    value={franchiseeSearch}
-    onChange={(e) => setFranchiseeSearch(e.target.value)}
-    placeholder="Rechercher un franchisé par nom"
-    className="border rounded px-2 py-1 text-sm"
-  />
-  {/* select des franchisés */}
-  <select
-    value={q.franchiseeId}
-    onChange={(e) => setQ((p) => ({ ...p, page: 1, franchiseeId: e.target.value }))}
-    className="border rounded px-2 py-1 text-sm min-w-[260px]">
+          {/* recherche par nom */}
+          <input
+            value={franchiseeSearch}
+            onChange={(e) => setFranchiseeSearch(e.target.value)}
+            placeholder="Rechercher un franchisé par nom"
+            className="border rounded px-2 py-1 text-sm"
+          />
+          {/* select des franchisés */}
+          <select
+            value={q.franchiseeId}
+            onChange={(e) => setQ((p) => ({ ...p, page: 1, franchiseeId: e.target.value }))}
+            className="border rounded px-2 py-1 text-sm min-w-[260px]">
             <option value="">— Sélectionner un franchisé —</option>
             {franchiseeOptions.map((f) => (
               <option key={f.id} value={f.id}>{f.name}</option>
@@ -190,9 +264,11 @@ export default function AgreementsPage() {
         pageSize={q.pageSize}
         total={total}
         onPageChange={(p) => setQ((prev) => ({ ...prev, page: p }))}
-        minTableWidth="min-w-[1000px]"
+        // une seule colonne : on fixe une largeur minimale modérée
+        minTableWidth="min-w-[640px]"
       />
 
+      {/* Modal création : champs prix/redevance désactivés (valeurs fixes) */}
       <Modal open={isOpen} onClose={() => setIsOpen(false)} maxWidth="max-w-xl">
         <form onSubmit={onCreateAgreement} className="p-4 space-y-3">
           <h2 className="text-lg font-semibold">Nouvel accord</h2>
@@ -224,22 +300,24 @@ export default function AgreementsPage() {
               <label className="block text-sm mb-1">Droit d’entrée (€ HT)</label>
               <input
                 value={form.entryFeeAmount}
-                onChange={(e) => setForm((p) => ({ ...p, entryFeeAmount: e.target.value }))}
-                className="border rounded px-2 py-1 w-full"
-                placeholder="50000.00"
-                required
+                className="border rounded px-2 py-1 w-full bg-gray-50"
+                disabled
+                readOnly
               />
             </div>
             <div>
               <label className="block text-sm mb-1">Redevance (ex: 0.0400)</label>
               <input
                 value={form.revenueSharePct}
-                onChange={(e) => setForm((p) => ({ ...p, revenueSharePct: e.target.value }))}
-                className="border rounded px-2 py-1 w-full"
-                placeholder="0.0400"
-                required
+                className="border rounded px-2 py-1 w-full bg-gray-50"
+                disabled
+                readOnly
               />
             </div>
+          </div>
+
+          <div className="text-xs -mt-2">
+            Ces montants sont fixés par la politique commerciale et ne sont pas modifiables.
           </div>
 
           <div>

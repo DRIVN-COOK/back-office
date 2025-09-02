@@ -12,3 +12,4 @@ export * from './loyalty.service';
 export * from './payment.service';
 export * from './reporting.service';
 export * from './audit.service';
+export * from './user.service';

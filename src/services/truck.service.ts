@@ -1,5 +1,5 @@
 // src/services/truck.service.ts
-import { api, type Truck, TruckStatus, type Paged } from '@drivn-cook/shared';
+import { api, type Truck, TruckStatus, type Paged, type TruckMaintenance } from '@drivn-cook/shared';
 
 export async function listTrucks(params: {
   search?: string;
@@ -36,4 +36,13 @@ export async function updateTruck(id: string, payload: Partial<Truck>) {
 
 export async function deleteTruck(id: string) {
   await api.delete(`/trucks/${id}`);
+}
+
+
+export async function listMaintenancesByTruck(
+  truckId: string,
+  params: { page?: number; pageSize?: number; status?: string }
+) {
+  const res = await api.get<Paged<TruckMaintenance>>(`/trucks/${truckId}/maintenances`, { params });
+  return res.data;
 }

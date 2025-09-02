@@ -14,6 +14,14 @@ type Row = {
 };
 type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };
 
+// Modèle minimal d'entrepôt (adapte les champs si besoin)
+type Warehouse = {
+  id: string;
+  name?: string | null;
+  code?: string | null;
+  city?: string | null;
+};
+
 export default function InventoryPage() {
   const [warehouseId, setWarehouseId] = useState('');
   const [query, setQuery] = useState('');
@@ -23,9 +31,41 @@ export default function InventoryPage() {
   const [pageSize] = useState(20);
   const [total, setTotal] = useState(0);
 
+  // Options d'entrepôts
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [whLoading, setWhLoading] = useState(false);
+
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState({ productId: '', qty: '0.000', notes: '' });
   const [errors, setErrors] = useState<Record<string,string>>({});
+
+  // Charge les entrepôts une fois au montage
+  useEffect(() => {
+    (async () => {
+      setWhLoading(true);
+      try {
+        // On récupère “beaucoup” d’entrpôts d’un coup; ajuste pageSize si tu en as vraiment beaucoup
+        const res = await api.get<Paged<Warehouse>>('/warehouses', { params: { page: 1, pageSize: 100 } });
+        setWarehouses(res.data.items ?? []);
+      } catch (e) {
+        console.error('Impossible de charger les entrepôts', e);
+      } finally {
+        setWhLoading(false);
+      }
+    })();
+  }, []);
+
+  // Options prêtes pour le <select>
+  const warehouseOptions = useMemo(() => {
+    const opts = warehouses.map((w): { id: string; label: string } => {
+      const labelParts = [w.name ?? w.code, w.city].filter(Boolean) as string[];
+      return { id: w.id, label: labelParts.length ? labelParts.join(' — ') : w.id };
+    });
+    // Tri alphabétique fr
+    return opts.sort((a: {label: string}, b: {label: string}) =>
+      a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' })
+    );
+  }, [warehouses]);
 
   async function load() {
     setLoading(true);
@@ -79,9 +119,28 @@ export default function InventoryPage() {
     <section className="space-y-4">
       <header className="flex items-center gap-2">
         <h1 className="text-xl font-semibold">Inventaires</h1>
-        <input value={warehouseId} onChange={(e)=>{ setPage(1); setWarehouseId(e.target.value); }} placeholder="WarehouseId" className="border rounded px-2 py-1 text-sm"/>
+
+        {/* Sélecteur d’entrepôt */}
+        <select
+          value={warehouseId}
+          onChange={(e) => { setPage(1); setWarehouseId(e.target.value); }}
+          className="border rounded px-2 py-1 text-sm"
+          disabled={whLoading || warehouseOptions.length === 0}
+          aria-label="Choisir un entrepôt"
+        >
+          <option value="">{whLoading ? 'Chargement des entrepôts…' : '— Choisir un entrepôt —'}</option>
+          {warehouseOptions.map((opt) => (
+            <option key={opt.id} value={opt.id}>{opt.label}</option>
+          ))}
+        </select>
+
         <div className="ml-auto flex items-center gap-2">
-          <input value={query} onChange={(e)=>{ setPage(1); setQuery(e.target.value); }} placeholder="Rechercher (SKU, nom…)" className="border rounded px-2 py-1 text-sm"/>
+          <input
+            value={query}
+            onChange={(e)=>{ setPage(1); setQuery(e.target.value); }}
+            placeholder="Rechercher (SKU, nom…)"
+            className="border rounded px-2 py-1 text-sm"
+          />
         </div>
       </header>
 
@@ -98,7 +157,7 @@ export default function InventoryPage() {
                 <th className="text-right px-3 py-2">Actions</th>
               </tr></thead>
               <tbody>
-                {items.map(inv => (
+                {items.map((inv) => (
                   <tr key={inv.id} className="border-t">
                     <td className="px-3 py-2">{inv.product?.sku ?? inv.productId} — {inv.product?.name ?? ''}</td>
                     <td className="px-3 py-2">{inv.onHand}</td>
@@ -121,7 +180,7 @@ export default function InventoryPage() {
           </div>
         </>
       ) : (
-        <div className="opacity-60">Saisis un <code>WarehouseId</code> pour afficher l’inventaire.</div>
+        <div className="opacity-60">Choisis un entrepôt pour afficher l’inventaire.</div>
       )}
 
       {/* Modal ajustement */}
