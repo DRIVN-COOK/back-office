@@ -10,12 +10,13 @@ type PriceRow = {
   productId: string;
   validFrom: string; // ISO
   validTo?: string | null;
-  priceHT: string;   // ou number -> on l'affiche tel quel
-  tvaPct: string;    // idem
+  priceHT: string;
+  tvaPct: string;
   product?: { id: string; name: string; sku: string };
 };
-
 type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };
+
+type Product = { id: string; name: string; sku: string };
 
 function toLocalDateTimeInputValue(iso?: string) {
   if (!iso) return '';
@@ -44,13 +45,20 @@ export default function PricesPage() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // cache local des produits (id -> product)
+  const [productMap, setProductMap] = useState<Record<string, Product>>({});
+
+  // charge tarifs
   useEffect(() => {
     setLoading(true);
     (async () => {
       try {
-        const res = await api.get<Paged<PriceRow>>('/product-prices', { params: { productId, page, pageSize } });
-        setItems(res.data.items ?? []);
-        setTotal(res.data.total ?? res.data.items?.length ?? 0);
+        const res = await api.get<Paged<PriceRow>>('/product-prices', {
+          params: { productId, page, pageSize },
+        });
+        const rows = res.data.items ?? [];
+        setItems(rows);
+        setTotal(res.data.total ?? rows.length);
       } catch (e) {
         console.error(e);
         setItems([]);
@@ -61,7 +69,45 @@ export default function PricesPage() {
     })();
   }, [productId, page, pageSize]);
 
+  // hydrate produits manquants si l’API n’a pas fait le include
+  useEffect(() => {
+    const missingIds = Array.from(
+      new Set(
+        items
+          .filter(r => !r.product && r.productId && !productMap[r.productId])
+          .map(r => r.productId)
+      )
+    );
+    if (missingIds.length === 0) return;
+
+    (async () => {
+      try {
+        // stratégie simple & robuste : charger un gros lot et mapper
+        // (adapte si ton API supporte GET /products?ids=... pour optimiser)
+        const res = await api.get<Paged<Product>>('/products', { params: { page: 1, pageSize: 100 } });
+        const all = res.data.items ?? [];
+        const picked: Record<string, Product> = {};
+        for (const p of all) {
+          if (missingIds.includes(p.id)) picked[p.id] = { id: p.id, name: p.name, sku: p.sku };
+        }
+        if (Object.keys(picked).length) {
+          setProductMap(prev => ({ ...prev, ...picked }));
+        }
+      } catch (e) {
+        console.warn('Hydratation produits impossible, fallback sur productId/sku.', e);
+      }
+    })();
+  }, [items, productMap]);
+
   const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
+
+  function displayProduct(row: PriceRow) {
+    const fromInclude = row.product;
+    const fromMap = productMap[row.productId];
+    const name = fromInclude?.name ?? fromMap?.name;
+    const sku = fromInclude?.sku ?? fromMap?.sku;
+    return name ?? sku ?? row.productId ?? '—';
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -76,8 +122,9 @@ export default function PricesPage() {
       setIsOpen(false);
       // reload
       const res = await api.get<Paged<PriceRow>>('/product-prices', { params: { productId, page, pageSize } });
-      setItems(res.data.items ?? []);
-      setTotal(res.data.total ?? res.data.items?.length ?? 0);
+      const rows = res.data.items ?? [];
+      setItems(rows);
+      setTotal(res.data.total ?? rows.length);
     } catch (err: unknown) {
       // ZodError côté front
       if (err && typeof err === 'object' && 'issues' in (err as any)) {
@@ -139,7 +186,7 @@ export default function PricesPage() {
           <tbody>
             {items.map(x => (
               <tr key={x.id} className="border-t">
-                <td className="px-3 py-2">{x.product?.sku ?? x.productId} — {x.product?.name ?? ''}</td>
+                <td className="px-3 py-2">{displayProduct(x)}</td>
                 <td className="px-3 py-2">{new Date(x.validFrom).toLocaleString()}</td>
                 <td className="px-3 py-2">{x.validTo ? new Date(x.validTo).toLocaleString() : '—'}</td>
                 <td className="px-3 py-2">{x.priceHT}</td>

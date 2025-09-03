@@ -7,9 +7,6 @@ import {
   Channel,
   orderQuerySchema,
 } from '@drivn-cook/shared';
-import { Link } from 'react-router-dom';
-
-// On part du principe que tu as déjà ces services.
 import { listCustomerOrders } from '../../services';
 
 type Row = {
@@ -23,6 +20,9 @@ type Row = {
   totalHT: string;   // decimal string
   totalTVA: string;  // decimal string
   totalTTC: string;  // decimal string
+  // Enrichissements (si l'API les renvoie via include)
+  franchisee?: { name: string };
+  truck?: { vin: string } | null;
 };
 
 type Query = {
@@ -60,7 +60,6 @@ export default function CustomerOrdersPage() {
   async function load() {
     setLoading(true);
     try {
-      // normalisation des params attendus par le schema/API
       const params = {
         ...q,
         q: q.q || undefined,
@@ -72,7 +71,6 @@ export default function CustomerOrdersPage() {
         to: q.to || undefined,
       };
 
-      // valide avant l'appel (le schema vient du shared)
       orderQuerySchema.parse(params);
 
       const data = await listCustomerOrders(params);
@@ -90,12 +88,10 @@ export default function CustomerOrdersPage() {
 
   const pages = useMemo(() => Math.max(1, Math.ceil(total / q.pageSize)), [total, q.pageSize]);
 
-  // formatters
   const fmtDateTime = (iso: string) => new Date(iso).toLocaleString();
   const fmtMoney = (v: string) =>
     new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(Number(v));
 
-  // colonnes DataTable
   const columns: Column<Row>[] = [
     { header: '#', render: (o) => `${o.id.slice(0, 8)}…`, getSortValue: (o) => o.id, width: 'w-28' },
     {
@@ -112,15 +108,17 @@ export default function CustomerOrdersPage() {
     },
     {
       header: 'Franchisé',
-      render: (o) => `${o.franchiseeId.slice(0, 8)}…`,
-      getSortValue: (o) => o.franchiseeId,
-      width: 'w-40',
+      // Affiche le nom si présent, sinon fallback sur l’ID tronqué
+      render: (o) => o.franchisee?.name ?? `${o.franchiseeId.slice(0, 8)}…`,
+      getSortValue: (o) => o.franchisee?.name ?? o.franchiseeId,
+      width: 'w-56',
     },
     {
-      header: 'Camion',
-      render: (o) => (o.truckId ? `${o.truckId.slice(0, 8)}…` : '—'),
-      getSortValue: (o) => o.truckId ?? '',
-      width: 'w-40',
+      header: 'Camion (VIN)',
+      // Affiche le VIN si présent, sinon fallback sur l’ID tronqué ou '—'
+      render: (o) => o.truck?.vin ?? (o.truckId ? `${o.truckId.slice(0, 8)}…` : '—'),
+      getSortValue: (o) => o.truck?.vin ?? o.truckId ?? '',
+      width: 'w-56',
     },
     {
       header: 'Placé le',
@@ -139,13 +137,19 @@ export default function CustomerOrdersPage() {
       header: 'Actions',
       render: (o) => (
         <div className="text-right">
-          <Link to={`/customer-order/${o.id}`} className="underline">
-            Ouvrir
-          </Link>
+          {/* Lien direct vers la route de génération/téléchargement du PDF */}
+          <a
+            href={`/api/customer-orders/${o.id}/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            Télécharger le PDF
+          </a>
         </div>
       ),
       align: 'right',
-      width: 'w-28',
+      width: 'w-40',
     },
   ];
 
@@ -188,35 +192,10 @@ export default function CustomerOrdersPage() {
             ))}
           </select>
 
-          <input
-            placeholder="FranchiseeId"
-            value={q.franchiseeId ?? ''}
-            onChange={(e) => setQ((p) => ({ ...p, franchiseeId: e.target.value, page: 1 }))}
-            className="border rounded px-2 py-1 text-sm"
-          />
-          <input
-            placeholder="TruckId"
-            value={q.truckId ?? ''}
-            onChange={(e) => setQ((p) => ({ ...p, truckId: e.target.value, page: 1 }))}
-            className="border rounded px-2 py-1 text-sm"
-          />
-          <input
-            placeholder="From (ISO)"
-            value={q.from ?? ''}
-            onChange={(e) => setQ((p) => ({ ...p, from: e.target.value, page: 1 }))}
-            className="border rounded px-2 py-1 text-sm"
-          />
-          <input
-            placeholder="To (ISO)"
-            value={q.to ?? ''}
-            onChange={(e) => setQ((p) => ({ ...p, to: e.target.value, page: 1 }))}
-            className="border rounded px-2 py-1 text-sm"
-          />
-        </div>
-
         <button onClick={() => setQ((p) => ({ ...p }))} className="border rounded px-2 py-1 text-sm">
           Filtrer
         </button>
+        </div>
       </header>
 
       <div className="text-sm opacity-70">{loading ? 'Chargement…' : `Total: ${total}`}</div>

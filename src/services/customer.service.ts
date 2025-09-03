@@ -23,3 +23,10 @@ export async function updateCustomer(id: string, payload: Partial<Customer>) {
 export async function deleteCustomer(id: string) {
   await api.delete(`/customers/${id}`);
 }
+
+export async function downloadCustomerOrderPdf(id: string) {
+  const res = await api.get(`/customer-orders/${id}/pdf`, {
+    responseType: 'blob',
+  });
+  return res.data as Blob;
+}

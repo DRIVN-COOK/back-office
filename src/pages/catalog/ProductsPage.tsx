@@ -1,6 +1,7 @@
 // back-office/src/pages/catalog/ProductsPage.tsx
 import { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
+import { useNavigate } from 'react-router-dom';
 import {
   Modal,
   DataTable,
@@ -11,13 +12,14 @@ import {
   type Column,
 } from '@drivn-cook/shared';
 import { listProducts, createProduct, updateProduct } from '../../services';
+import { api } from '@drivn-cook/shared';
 
 type ProductRow = {
   id: string;
   sku: string;
   name: string;
   type: ProductType;
-  unit: Unit;
+  unit: Unit;             // on la garde en mémoire mais on ne l’affiche plus
   isCoreStock: boolean;
   active: boolean;
   createdAt: string;
@@ -27,18 +29,18 @@ type FormShape = {
   sku: string;
   name: string;
   type: ProductType;
-  unit: Unit;
+  // unit retirée de l’UI : on la gère en coulisses
   isCoreStock: boolean;
-  active: boolean;
+  // active retiré de l’UI : on supprime plutôt que toggle
 };
+
+const DEFAULT_UNIT: Unit = (Object.values(Unit).includes('UNIT' as Unit) ? 'UNIT' : Object.values(Unit)[0]) as Unit;
 
 const EMPTY_FORM: FormShape = {
   sku: '',
   name: '',
   type: Object.values(ProductType)[0] as ProductType,
-  unit: Object.values(Unit)[0] as Unit,
   isCoreStock: true,
-  active: true,
 };
 
 function normalizeForm(f: FormShape) {
@@ -49,10 +51,31 @@ function normalizeForm(f: FormShape) {
   };
 }
 
+// utils recherche
+function norm(s: unknown) {
+  return String(s ?? '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim();
+}
+function matches(p: ProductRow, q: string) {
+  const nq = norm(q);
+  return (
+    norm(p.sku).includes(nq) ||
+    norm(p.name).includes(nq) ||
+    norm(p.type).includes(nq)
+  );
+}
+
 export default function ProductsPage() {
+  const navigate = useNavigate();
+
   const [items, setItems] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -63,17 +86,31 @@ export default function ProductsPage() {
   const [form, setForm] = useState<FormShape>({ ...EMPTY_FORM });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // debounce recherche
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(t);
+  }, [query]);
+
   // chargement liste
   async function load() {
     setLoading(true);
     try {
+      const wantClientFilter = debouncedQuery.trim().length > 0;
+      const effectivePage = wantClientFilter ? 1 : page;
+      const effectivePageSize = wantClientFilter ? 100 : pageSize;
+
       const data = await listProducts({
-        q: query || undefined,
-        page,
-        pageSize,
+        q: debouncedQuery || undefined,
+        page: effectivePage,
+        pageSize: effectivePageSize,
       });
-      setItems(data.items ?? []);
-      setTotal(data.total ?? data.items?.length ?? 0);
+
+      const list = data.items ?? [];
+      const filtered = wantClientFilter ? list.filter(p => matches(p as ProductRow, debouncedQuery)) : list;
+
+      setItems(filtered as ProductRow[]);
+      setTotal(wantClientFilter ? filtered.length : (data.total ?? list.length));
     } catch (e) {
       console.error(e);
       setItems([]);
@@ -84,18 +121,21 @@ export default function ProductsPage() {
   }
 
   useEffect(() => {
+    // reset page sur nouvelle recherche
+    setPage(1);
+  }, [debouncedQuery]);
+
+  useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, page, pageSize]);
+  }, [debouncedQuery, page, pageSize]);
 
-  // Fallback filtre client si l'API ne filtre pas (robustesse)
-  const filteredItems = useMemo(() => {
-    const s = query.trim().toLowerCase();
-    if (!s) return items;
-    return items.filter((p) =>
-      [p.sku, p.name, p.type, p.unit].some((v) => String(v ?? '').toLowerCase().includes(s)),
-    );
-  }, [items, query]);
+  // pagination client si filtre client actif
+  const shownItems = useMemo(() => {
+    if (!debouncedQuery) return items;
+    const start = (page - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  }, [items, page, pageSize, debouncedQuery]);
 
   function openCreate() {
     setEditing(null);
@@ -110,12 +150,26 @@ export default function ProductsPage() {
       sku: p.sku,
       name: p.name,
       type: p.type,
-      unit: p.unit,
       isCoreStock: p.isCoreStock,
-      active: p.active,
     });
     setErrors({});
     setIsOpen(true);
+  }
+
+  // suppression réelle (DELETE)
+  async function deleteProduct(id: string) {
+    if (!confirm('Supprimer définitivement ce produit ?')) return;
+    const backup = [...items];
+    setItems((xs) => xs.filter((x) => x.id !== id));
+    try {
+      await api.delete(`/products/${id}`);
+      // re-sync (utile si l’API recalcule total)
+      await load();
+    } catch (e) {
+      console.error(e);
+      setItems(backup);
+      alert('Suppression impossible.');
+    }
   }
 
   async function submitForm(e: React.FormEvent) {
@@ -126,10 +180,20 @@ export default function ProductsPage() {
       const normalized = normalizeForm(form);
 
       if (editing) {
-        const payload = productUpdateSchema.parse(normalized);
+        // on préserve l’unité existante (non affichée)
+        const payload = productUpdateSchema.parse({
+          ...normalized,
+          unit: editing.unit,        // garder l’unité existante
+          active: editing.active,    // on ne gère plus “actif” dans l’UI
+        });
         await updateProduct(editing.id, payload);
       } else {
-        const payload = productCreateSchema.parse(normalized);
+        // création : on injecte unit par défaut
+        const payload = productCreateSchema.parse({
+          ...normalized,
+          unit: DEFAULT_UNIT,
+          active: true,
+        });
         await createProduct(payload);
         setPage(1);
       }
@@ -159,57 +223,34 @@ export default function ProductsPage() {
     }
   }
 
-  async function toggleActive(p: ProductRow) {
-    const snapshot = [...items];
-    setItems((list) => list.map((x) => (x.id === p.id ? { ...x, active: !x.active } : x)));
-    try {
-      await updateProduct(p.id, { active: !p.active });
-    } catch (e) {
-      console.error(e);
-      setItems(snapshot);
-      alert('Impossible de changer le statut.');
-    }
-  }
-
   const TYPE_OPTIONS = Object.values(ProductType) as ProductType[];
-  const UNIT_OPTIONS = Object.values(Unit) as Unit[];
 
-  // colonnes DataTable (shared)
+  // colonnes DataTable (shared) — “Unité” & “Actif” retirées, “Supprimer” ajouté
   const columns: Column<ProductRow>[] = [
     { header: 'SKU', render: (p) => p.sku, getSortValue: (p) => p.sku, width: 'w-36' },
-    { header: 'Nom', render: (p) => p.name, getSortValue: (p) => p.name, width: 'min-w-[200px]' },
+    { header: 'Nom', render: (p) => p.name, getSortValue: (p) => p.name, width: 'min-w-[220px]' },
     { header: 'Type', render: (p) => p.type, getSortValue: (p) => p.type, width: 'w-40' },
-    { header: 'Unité', render: (p) => p.unit, getSortValue: (p) => p.unit, width: 'w-28' },
     {
-      header: 'Core(80%)',
+      header: 'Core (80%)',
       render: (p) => (p.isCoreStock ? 'Oui' : 'Non'),
       getSortValue: (p) => (p.isCoreStock ? 1 : 0),
       width: 'w-28',
     },
     {
-      header: 'Actif',
-      render: (p) => (
-        <button onClick={() => toggleActive(p)} className="underline">
-          {p.active ? 'Actif' : 'Inactif'}
-        </button>
-      ),
-      getSortValue: (p) => (p.active ? 1 : 0),
-      width: 'w-24',
-    },
-    {
       header: 'Actions',
       render: (p) => (
         <div className="text-right space-x-3">
-          <button onClick={() => openEdit(p)} className="underline">
-            Éditer
-          </button>
-          <a href={`/prices?productId=${p.id}`} className="underline">
+          <button onClick={() => openEdit(p)} className="underline">Éditer</button>
+          <button onClick={() => navigate(`/prices?productId=${p.id}`)} className="underline">
             Tarifs
-          </a>
+          </button>
+          <button onClick={() => deleteProduct(p.id)} className="text-red-600 underline">
+            Supprimer
+          </button>
         </div>
       ),
       align: 'right',
-      width: 'w-36',
+      width: 'w-48',
     },
   ];
 
@@ -218,25 +259,35 @@ export default function ProductsPage() {
       <header className="flex items-center gap-2">
         <h1 className="text-xl font-semibold">Produits</h1>
         <div className="ml-auto flex items-center gap-2">
-          <input
-            value={query}
-            onChange={(e) => {
-              setPage(1);
-              setQuery(e.target.value);
-            }}
-            placeholder="Rechercher (SKU, nom…)"
-            className="border rounded px-2 py-1 text-sm"
-          />
+          <div className="relative">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Rechercher (nom)"
+              className="border rounded px-2 py-1 text-sm pr-6"
+            />
+            {query && (
+              <button
+                title="Effacer"
+                onClick={() => setQuery('')}
+                className="absolute right-1 top-1/2 -translate-y-1/2 text-xs px-1 opacity-70 hover:opacity-100"
+              >
+                ✕
+              </button>
+            )}
+          </div>
           <button onClick={openCreate} className="border rounded px-2 py-1 text-sm">
             Nouveau
           </button>
         </div>
       </header>
 
-      <div className="text-sm opacity-70">{loading ? 'Chargement…' : `Total: ${total}`}</div>
+      <div className="text-sm opacity-70">
+        {loading ? 'Chargement…' : `Total: ${total}${debouncedQuery ? ' (filtré)' : ''}`}
+      </div>
 
       <DataTable
-        items={filteredItems}
+        items={shownItems}
         columns={columns}
         loading={loading}
         page={page}
@@ -279,50 +330,25 @@ export default function ProductsPage() {
                 className="border rounded px-2 py-1 w-full"
               >
                 {TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
+                  <option key={t} value={t}>{t}</option>
                 ))}
               </select>
               {errors.type && <p className="text-xs text-red-600">{errors.type}</p>}
             </div>
 
-            <div>
-              <label className="block text-sm mb-1">Unité</label>
-              <select
-                value={form.unit}
-                onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}
-                className="border rounded px-2 py-1 w-full"
-              >
-                {UNIT_OPTIONS.map((u) => (
-                  <option key={u} value={u}>
-                    {u}
-                  </option>
-                ))}
-              </select>
-              {errors.unit && <p className="text-xs text-red-600">{errors.unit}</p>}
+            <div className="flex items-end">
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.isCoreStock}
+                  onChange={(e) => setForm({ ...form, isCoreStock: e.target.checked })}
+                />
+                Core (80%)
+              </label>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.isCoreStock}
-                onChange={(e) => setForm({ ...form, isCoreStock: e.target.checked })}
-              />
-              Core (80%)
-            </label>
-
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.active}
-                onChange={(e) => setForm({ ...form, active: e.target.checked })}
-              />
-              Actif
-            </label>
-          </div>
+          {/* NB: pas de champ Unité / Actif dans l’UI */}
 
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setIsOpen(false)} className="border rounded px-3 py-1">

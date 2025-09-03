@@ -1,8 +1,7 @@
 // src/nav.ts
 import type { LucideIcon } from 'lucide-react';
 import {
-  LayoutDashboard, Store, FileText, Truck, Wrench, Package, Boxes,
-  MoveRight, Users, Tag, ReceiptText, ShoppingCart, BarChart3, Shield, BookOpen
+  LayoutDashboard, Store, FileText, Truck, Wrench, Package, Boxes, Users, Tag, ReceiptText, ShoppingCart, Shield,
 } from 'lucide-react';
 
 export type NavItem = { to: string; label: string; icon: LucideIcon };
@@ -39,12 +38,6 @@ export const navSections: NavSection[] = [
       { to: '/prices', label: 'Tarifs', icon: ReceiptText },
       { to: '/purchase-orders', label: 'Commandes d’appro', icon: ShoppingCart },
       { to: '/customer-orders', label: 'Commandes clients', icon: ReceiptText }
-    ],
-  },
-  {
-    title: 'Reporting',
-    items: [
-      { to: '/reporting', label: 'Ventes', icon: BarChart3 },
     ],
   },
   {
