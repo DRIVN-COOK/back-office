@@ -19,7 +19,7 @@ type ProductRow = {
   sku: string;
   name: string;
   type: ProductType;
-  unit: Unit;             // on la garde en mémoire mais on ne l’affiche plus
+  unit: Unit;             // gardé pour la persistance, non affiché
   isCoreStock: boolean;
   active: boolean;
   createdAt: string;
@@ -29,10 +29,22 @@ type FormShape = {
   sku: string;
   name: string;
   type: ProductType;
-  // unit retirée de l’UI : on la gère en coulisses
   isCoreStock: boolean;
-  // active retiré de l’UI : on supprime plutôt que toggle
 };
+
+// ── Libellés FR ────────────────────────────────────────────────────────────────
+const TYPE_LABEL: Record<ProductType, string> = {
+  [ProductType.INGREDIENT]: 'Ingrédient',
+  [ProductType.PREPARED_DISH]: 'Plat préparé',
+  [ProductType.BEVERAGE]: 'Boisson',
+  [ProductType.MISC]: 'Divers',
+};
+
+const TYPE_OPTIONS = Object.values(ProductType) as ProductType[];
+
+function typeLabel(t: ProductType) {
+  return TYPE_LABEL[t] ?? String(t);
+}
 
 const DEFAULT_UNIT: Unit = (Object.values(Unit).includes('UNIT' as Unit) ? 'UNIT' : Object.values(Unit)[0]) as Unit;
 
@@ -64,7 +76,7 @@ function matches(p: ProductRow, q: string) {
   return (
     norm(p.sku).includes(nq) ||
     norm(p.name).includes(nq) ||
-    norm(p.type).includes(nq)
+    norm(typeLabel(p.type)).includes(nq) // ← on cherche sur libellé FR
   );
 }
 
@@ -223,18 +235,15 @@ export default function ProductsPage() {
     }
   }
 
-  const TYPE_OPTIONS = Object.values(ProductType) as ProductType[];
-
-  // colonnes DataTable (shared) — “Unité” & “Actif” retirées, “Supprimer” ajouté
+  // colonnes DataTable — “Type” en FR
   const columns: Column<ProductRow>[] = [
     { header: 'SKU', render: (p) => p.sku, getSortValue: (p) => p.sku, width: 'w-36' },
     { header: 'Nom', render: (p) => p.name, getSortValue: (p) => p.name, width: 'min-w-[220px]' },
-    { header: 'Type', render: (p) => p.type, getSortValue: (p) => p.type, width: 'w-40' },
     {
-      header: 'Core (80%)',
-      render: (p) => (p.isCoreStock ? 'Oui' : 'Non'),
-      getSortValue: (p) => (p.isCoreStock ? 1 : 0),
-      width: 'w-28',
+      header: 'Type',
+      render: (p) => typeLabel(p.type),
+      getSortValue: (p) => typeLabel(p.type).toLowerCase(),
+      width: 'w-40',
     },
     {
       header: 'Actions',
@@ -263,7 +272,7 @@ export default function ProductsPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Rechercher (nom)"
+              placeholder="Rechercher (nom / type)"
               className="border rounded px-2 py-1 text-sm pr-6"
             />
             {query && (
@@ -330,21 +339,12 @@ export default function ProductsPage() {
                 className="border rounded px-2 py-1 w-full"
               >
                 {TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
+                  <option key={t} value={t}>
+                    {typeLabel(t)}
+                  </option>
                 ))}
               </select>
               {errors.type && <p className="text-xs text-red-600">{errors.type}</p>}
-            </div>
-
-            <div className="flex items-end">
-              <label className="inline-flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.isCoreStock}
-                  onChange={(e) => setForm({ ...form, isCoreStock: e.target.checked })}
-                />
-                Core (80%)
-              </label>
             </div>
           </div>
 

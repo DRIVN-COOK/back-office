@@ -59,12 +59,12 @@ export default function FranchiseesPage() {
   const [fuLoading, setFuLoading] = useState(false);
   const [franchiseUsers, setFranchiseUsers] = useState<FranchiseUser[]>([]);
   const [attachUserForm, setAttachUserForm] = useState<{
-  userId: string;
-  roleInFranchise: '' | FranchiseRole;
-}>({
-  userId: '',
-  roleInFranchise: 'STAFF' as FranchiseRole,
-});
+    userId: string;
+    roleInFranchise: '' | FranchiseRole;
+  }>({
+    userId: '',
+    roleInFranchise: 'STAFF' as FranchiseRole,
+  });
 
   // Debounces
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -114,16 +114,16 @@ export default function FranchiseesPage() {
   }
 
   function handleManagerChangeRole(franchiseUserId: string, roleStr: string): void {
-  const role = (roleStr || '') as '' | FranchiseRole;
-  void onChangeFranchiseUserRole(franchiseUserId, role); // on ignore la Promise
-}
+    const role = (roleStr || '') as '' | FranchiseRole;
+    void onChangeFranchiseUserRole(franchiseUserId, role); // on ignore la Promise
+  }
 
-function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }): void {
-  setAttachUserForm(prev => ({
-    userId: patch.userId ?? prev.userId,
-    roleInFranchise: (patch.roleInFranchise ?? prev.roleInFranchise) as '' | FranchiseRole,
-  }));
-}
+  function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }): void {
+    setAttachUserForm((prev) => ({
+      userId: patch.userId ?? prev.userId,
+      roleInFranchise: (patch.roleInFranchise ?? prev.roleInFranchise) as '' | FranchiseRole,
+    }));
+  }
 
   /** Effects */
   useEffect(() => {
@@ -142,6 +142,11 @@ function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q.search, q.onlyInactive]);
+
+  //  Charge la liste des entrepôts au montage pour pouvoir afficher le NOM dans le tableau
+  useEffect(() => {
+    void loadWarehousesForSelect();
+  }, []);
 
   /** Actions */
   function openCreate() {
@@ -186,10 +191,10 @@ function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }
   }
 
   async function onChangeFranchiseUserRole(franchiseUserId: string, role: '' | FranchiseRole) {
-  const payload = role ? { roleInFranchise: role as FranchiseRole } : {}; 
-  await updateFranchiseUser(franchiseUserId, payload);
-  if (editing) await loadFranchiseUsersFor(editing.id);
-}
+    const payload = role ? { roleInFranchise: role as FranchiseRole } : {};
+    await updateFranchiseUser(franchiseUserId, payload);
+    if (editing) await loadFranchiseUsersFor(editing.id);
+  }
 
   async function onDetachFranchiseUser(franchiseUserId: string) {
     if (!confirm('Détacher cet utilisateur de la franchise ?')) return;
@@ -198,20 +203,27 @@ function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }
   }
 
   async function onAttachFranchiseUser() {
-  if (!editing) return;
-  if (!attachUserForm.userId) return alert('Sélectionne un utilisateur');
+    if (!editing) return;
+    if (!attachUserForm.userId) return alert('Sélectionne un utilisateur');
 
-  const payload = {
-    userId: attachUserForm.userId,
-    franchiseeId: editing.id,
-    ...(attachUserForm.roleInFranchise
-      ? { roleInFranchise: attachUserForm.roleInFranchise as FranchiseRole }
-      : {}),
-  };
-  await attachFranchiseUser(payload);
-  setAttachUserForm({ userId: '', roleInFranchise: 'STAFF' as FranchiseRole });
-  await loadFranchiseUsersFor(editing.id);
-}
+    const payload = {
+      userId: attachUserForm.userId,
+      franchiseeId: editing.id,
+      ...(attachUserForm.roleInFranchise
+        ? { roleInFranchise: attachUserForm.roleInFranchise as FranchiseRole }
+        : {}),
+    };
+    await attachFranchiseUser(payload);
+    setAttachUserForm({ userId: '', roleInFranchise: 'STAFF' as FranchiseRole });
+    await loadFranchiseUsersFor(editing.id);
+  }
+
+  /** Helper: récupérer le nom d'entrepôt depuis l'id */
+  function getWarehouseName(id?: string | null): string {
+    if (!id) return '—';
+    const wh = warehouses.find((w) => w.id === id);
+    return wh?.name ?? '—';
+  }
 
   /** Columns for DataTable */
   const columns: Column<Franchisee>[] = [
@@ -233,16 +245,10 @@ function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }
     },
     {
       header: 'Entrepôt par défaut',
-      render: (f) => (f.defaultWarehouseId ? f.defaultWarehouseId.slice(0, 8) + '…' : '—'),
-      getSortValue: (f) => f.defaultWarehouseId ?? '',
-      width: 'w-48',
-    },
-    {
-      header: 'Actif',
-      render: (f) => (f.active ? 'Oui' : 'Non'),
-      getSortValue: (f) => (f.active ? 1 : 0),
-      align: 'center',
-      width: 'w-24',
+      // ⬇️ Affiche le NOM au lieu de l’ID
+      render: (f) => getWarehouseName(f.defaultWarehouseId),
+      getSortValue: (f) => getWarehouseName(f.defaultWarehouseId),
+      width: 'w-56',
     },
     {
       header: 'Actions',
@@ -269,14 +275,6 @@ function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }
             placeholder="nom / SIREN"
             className="border rounded px-2 py-1 text-sm"
           />
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={q.onlyInactive}
-              onChange={(e) => setQ((p) => ({ ...p, onlyInactive: e.target.checked }))}
-            />{' '}
-            Inactifs
-          </label>
           <button onClick={openCreate} className="border rounded px-2 py-1 text-sm">
             Nouveau
           </button>
@@ -297,7 +295,7 @@ function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }
       {/* Modal */}
       <Modal open={isOpen} onClose={() => setIsOpen(false)} maxWidth="max-w-3xl">
         <div className="max-h-[calc(100vh-2rem)] z-50 overflow-y-auto min-h-0">
-        <form onSubmit={submit} className="p-4 space-y-4">
+          <form onSubmit={submit} className="p-4 space-y-4">
             <div className="bg-white pt-4 pb-3 -mt-4 -mx-4 px-4 border-b">
               <div className="flex items-start">
                 <h2 className="text-lg font-semibold">
@@ -311,32 +309,32 @@ function handleAttachChange(patch: { userId?: string; roleInFranchise?: string }
               </div>
             </div>
 
-          <FranchiseeForm
-            value={form}
-            onChange={setForm}
-            warehouses={warehouses}
-            warehousesLoading={whLoading}
-          />
-
-          {editing && (
-            <FranchiseUsersManager
-              items={franchiseUsers}
-              loading={fuLoading}
-              onChangeRole={handleManagerChangeRole}       
-              onDetach={onDetachFranchiseUser}
-              attach={attachUserForm}                       
-              onAttachChange={handleAttachChange}           
-              onAttachSubmit={onAttachFranchiseUser}
-              searchUsers={searchUsersAdapter}
+            <FranchiseeForm
+              value={form}
+              onChange={setForm}
+              warehouses={warehouses}
+              warehousesLoading={whLoading}
             />
-          )}
 
-           <div className="sticky bottom-0 z-10 bg-white pt-3 pb-4 -mb-4 -mx-4 px-4 border-t flex justify-end gap-2">
-          <button type="button" onClick={() => setIsOpen(false)} className="border rounded px-3 py-1">Annuler</button>
-          <button type="submit" className="border rounded px-3 py-1">{editing ? 'Enregistrer' : 'Créer'}</button>
+            {editing && (
+              <FranchiseUsersManager
+                items={franchiseUsers}
+                loading={fuLoading}
+                onChangeRole={handleManagerChangeRole}
+                onDetach={onDetachFranchiseUser}
+                attach={attachUserForm}
+                onAttachChange={handleAttachChange}
+                onAttachSubmit={onAttachFranchiseUser}
+                searchUsers={searchUsersAdapter}
+              />
+            )}
+
+            <div className="sticky bottom-0 z-10 bg-white pt-3 pb-4 -mb-4 -mx-4 px-4 border-t flex justify-end gap-2">
+              <button type="button" onClick={() => setIsOpen(false)} className="border rounded px-3 py-1">Annuler</button>
+              <button type="submit" className="border rounded px-3 py-1">{editing ? 'Enregistrer' : 'Créer'}</button>
+            </div>
+          </form>
         </div>
-      </form>
-      </div>
       </Modal>
     </section>
   );

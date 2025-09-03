@@ -18,6 +18,17 @@ import {
   listWarehouses,
 } from '../../services';
 
+// --- Traductions statut ---
+const STATUS_LABEL: Record<TruckStatus, string> = {
+  [TruckStatus.AVAILABLE]: 'Disponible',
+  [TruckStatus.DEPLOYED]: 'Déployé',
+  [TruckStatus.IN_MAINTENANCE]: 'En maintenance',
+  [TruckStatus.OUT_OF_SERVICE]: 'Hors service',
+};
+function statusLabel(s: TruckStatus) {
+  return STATUS_LABEL[s] ?? String(s);
+}
+
 // --- Schemas FRONT (on étend ceux du shared pour tolérer null côté UI) ---
 const uuidNullable = z.string().uuid().nullable().optional();
 
@@ -230,16 +241,16 @@ export default function TrucksPage() {
     };
   }
 
-  // Validation métier UI
+  // Validation métier UI (messages FR)
   function validateBusiness(data: FormShape) {
     const hasFr = !!data.franchiseeId;
     const hasWh = !!data.warehouseId;
     if (!hasFr && !hasWh) return 'Choisir un franchisé OU un entrepôt (au moins un).';
     if (hasFr && data.currentStatus === TruckStatus.AVAILABLE) {
-      return 'Statut indisponible : un camion rattaché à un franchisé ne peut pas être "AVAILABLE".';
+      return 'Statut indisponible : un camion rattaché à un franchisé ne peut pas être "Disponible".';
     }
     if (hasWh && data.currentStatus === TruckStatus.DEPLOYED) {
-      return 'Statut indisponible : un camion rattaché à un entrepôt ne peut pas être "DEPLOYED".';
+      return 'Statut indisponible : un camion rattaché à un entrepôt ne peut pas être "Déployé".';
     }
     return null;
   }
@@ -257,11 +268,9 @@ export default function TrucksPage() {
       }
 
       if (editing) {
-        // null ou string sont acceptés par updateSchema (local)
         const payload = updateSchema.parse(normalized as any);
         await updateTruck(editing.id, payload as any);
       } else {
-        // create : idem, on autorise null côté front (API gère)
         const payload = createSchema.parse(normalized as any);
         await createTruck(payload as any);
         setQ((p) => ({ ...p, page: 1 }));
@@ -361,11 +370,11 @@ export default function TrucksPage() {
     },
     {
       header: 'Statut',
-      render: (t) => t.currentStatus,
-      getSortValue: (t) => t.currentStatus,
+      render: (t) => statusLabel(t.currentStatus),
+      getSortValue: (t) => statusLabel(t.currentStatus).toLowerCase(),
       width: 'w-40',
     },
-   {
+    {
       header: 'Actions',
       render: (t) => (
         <div className="text-right space-x-3">
@@ -399,7 +408,7 @@ export default function TrucksPage() {
             <option value="ALL">Tous statuts</option>
             {STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {statusLabel(s)}
               </option>
             ))}
           </select>
@@ -557,7 +566,7 @@ export default function TrucksPage() {
                 >
                   {allowedStatuses(form).map((s) => (
                     <option key={s} value={s}>
-                      {s}
+                      {statusLabel(s)}
                     </option>
                   ))}
                 </select>

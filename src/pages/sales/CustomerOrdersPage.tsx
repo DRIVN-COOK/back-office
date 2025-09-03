@@ -1,5 +1,5 @@
 // back-office/src/pages/sales/CustomerOrdersPage.tsx
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   DataTable,
   type Column,
@@ -17,10 +17,9 @@ type Row = {
   channel: Channel;
   status: OrderStatus;
   placedAt: string;
-  totalHT: string;   // decimal string
-  totalTVA: string;  // decimal string
-  totalTTC: string;  // decimal string
-  // Enrichissements (si l'API les renvoie via include)
+  totalHT: string;
+  totalTVA: string;
+  totalTTC: string;
   franchisee?: { name: string };
   truck?: { vin: string } | null;
 };
@@ -36,6 +35,22 @@ type Query = {
   page: number;
   pageSize: number;
 };
+
+// ── Libellés FR ────────────────────────────────────────────────────────────────
+const STATUS_LABEL: Partial<Record<OrderStatus, string>> = {
+  PENDING: 'En attente',
+  CONFIRMED: 'Confirmée',
+  PREPARING: 'En préparation',
+  READY: 'Prête',
+  CANCELLED: 'Annulée',
+
+};
+const CHANNEL_LABEL: Partial<Record<Channel, string>> = {
+  IN_PERSON: 'Sur place',
+   ONLINE_PREORDER: 'En ligne',
+};
+const statusLabel = (s: OrderStatus) => STATUS_LABEL[s] ?? String(s);
+const channelLabel = (c: Channel) => CHANNEL_LABEL[c] ?? String(c);
 
 export default function CustomerOrdersPage() {
   const [q, setQ] = useState<Query>({
@@ -70,9 +85,7 @@ export default function CustomerOrdersPage() {
         from: q.from || undefined,
         to: q.to || undefined,
       };
-
       orderQuerySchema.parse(params);
-
       const data = await listCustomerOrders(params);
       setItems(data.items ?? []);
       setTotal(data.total ?? data.items?.length ?? 0);
@@ -86,8 +99,6 @@ export default function CustomerOrdersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q.page, q.pageSize, q.status, q.channel, q.franchiseeId, q.truckId, q.from, q.to, q.q]);
 
-  const pages = useMemo(() => Math.max(1, Math.ceil(total / q.pageSize)), [total, q.pageSize]);
-
   const fmtDateTime = (iso: string) => new Date(iso).toLocaleString();
   const fmtMoney = (v: string) =>
     new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(Number(v));
@@ -96,26 +107,24 @@ export default function CustomerOrdersPage() {
     { header: '#', render: (o) => `${o.id.slice(0, 8)}…`, getSortValue: (o) => o.id, width: 'w-28' },
     {
       header: 'Canal',
-      render: (o) => o.channel,
-      getSortValue: (o) => CHANNEL_OPTIONS.indexOf(o.channel),
+      render: (o) => channelLabel(o.channel),
+      getSortValue: (o) => channelLabel(o.channel).toLowerCase(),
       width: 'w-44',
     },
     {
       header: 'Statut',
-      render: (o) => o.status,
-      getSortValue: (o) => STATUS_OPTIONS.indexOf(o.status),
+      render: (o) => statusLabel(o.status),
+      getSortValue: (o) => statusLabel(o.status).toLowerCase(),
       width: 'w-44',
     },
     {
       header: 'Franchisé',
-      // Affiche le nom si présent, sinon fallback sur l’ID tronqué
       render: (o) => o.franchisee?.name ?? `${o.franchiseeId.slice(0, 8)}…`,
       getSortValue: (o) => o.franchisee?.name ?? o.franchiseeId,
       width: 'w-56',
     },
     {
       header: 'Camion (VIN)',
-      // Affiche le VIN si présent, sinon fallback sur l’ID tronqué ou '—'
       render: (o) => o.truck?.vin ?? (o.truckId ? `${o.truckId.slice(0, 8)}…` : '—'),
       getSortValue: (o) => o.truck?.vin ?? o.truckId ?? '',
       width: 'w-56',
@@ -137,7 +146,6 @@ export default function CustomerOrdersPage() {
       header: 'Actions',
       render: (o) => (
         <div className="text-right">
-          {/* Lien direct vers la route de génération/téléchargement du PDF */}
           <a
             href={`/api/customer-orders/${o.id}/pdf`}
             target="_blank"
@@ -174,7 +182,7 @@ export default function CustomerOrdersPage() {
             <option value="">Tous statuts</option>
             {STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {statusLabel(s)}
               </option>
             ))}
           </select>
@@ -187,14 +195,14 @@ export default function CustomerOrdersPage() {
             <option value="">Tous canaux</option>
             {CHANNEL_OPTIONS.map((c) => (
               <option key={c} value={c}>
-                {c}
+                {channelLabel(c)}
               </option>
             ))}
           </select>
 
-        <button onClick={() => setQ((p) => ({ ...p }))} className="border rounded px-2 py-1 text-sm">
-          Filtrer
-        </button>
+          <button onClick={() => setQ((p) => ({ ...p }))} className="border rounded px-2 py-1 text-sm">
+            Filtrer
+          </button>
         </div>
       </header>
 
@@ -210,26 +218,6 @@ export default function CustomerOrdersPage() {
         onPageChange={(p) => setQ((prev) => ({ ...prev, page: p }))}
         minTableWidth="min-w-[1100px]"
       />
-
-      <div className="flex items-center gap-2 justify-end">
-        <button
-          disabled={q.page <= 1}
-          onClick={() => setQ((p) => ({ ...p, page: Math.max(1, p.page - 1) }))}
-          className="border rounded px-2 py-1 disabled:opacity-50"
-        >
-          Précédent
-        </button>
-        <span className="text-sm">
-          Page {q.page} / {pages}
-        </span>
-        <button
-          disabled={q.page >= pages}
-          onClick={() => setQ((p) => ({ ...p, page: Math.min(pages, p.page + 1) }))}
-          className="border rounded px-2 py-1 disabled:opacity-50"
-        >
-          Suivant
-        </button>
-      </div>
     </section>
   );
 }

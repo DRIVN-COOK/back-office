@@ -35,7 +35,6 @@ export const navSections: NavSection[] = [
     items: [
       { to: '/suppliers', label: 'Fournisseurs', icon: Users },
       { to: '/products', label: 'Produits', icon: Tag },
-      { to: '/prices', label: 'Tarifs', icon: ReceiptText },
       { to: '/purchase-orders', label: 'Commandes d’appro', icon: ShoppingCart },
       { to: '/customer-orders', label: 'Commandes clients', icon: ReceiptText }
     ],

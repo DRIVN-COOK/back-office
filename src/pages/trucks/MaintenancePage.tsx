@@ -63,6 +63,25 @@ const EMPTY_FORM: FormShape = {
 
 const toLocal = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('fr-FR') : '—');
 
+// ★ Helpers date/heure local ↔ ISO (évite le décalage UTC)
+function toInputLocalValue(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mm = pad(d.getMinutes());
+  return `${y}-${m}-${day}T${hh}:${mm}`;
+}
+function fromInputLocalToISO(v: string) {
+  // v au format 'YYYY-MM-DDTHH:mm' interprété en local
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? '' : d.toISOString();
+}
+function isPast(iso: string) {
+  return new Date(iso).getTime() < Date.now();
+}
+
 // N’envoie scheduledAt/completedAt que si cohérent avec le statut
 function normalizeForm(f: FormShape) {
   return {
@@ -79,7 +98,6 @@ function normalizeForm(f: FormShape) {
 export default function MaintenancePage() {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
-  // supporte /maintenance?truckId=... et /trucks/:truckId/maintenance
   const paramTruckId = sp.get('truckId') || (useParams() as any)?.truckId || '';
   const fixedTruckId = paramTruckId || '';
 
@@ -93,6 +111,9 @@ export default function MaintenancePage() {
   const [isOpen, setIsOpen] = useState(false);
   const [form, setForm] = useState<FormShape>({ ...EMPTY_FORM, truckId: fixedTruckId });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // ★ min pour datetime-local (mis à jour au rendu)
+  const nowLocalMin = toInputLocalValue(new Date());
 
   // Select camion (recherche)
   const [truckSearch, setTruckSearch] = useState('');
@@ -121,25 +142,23 @@ export default function MaintenancePage() {
   }
 
   async function searchTrucks(term: string) {
-  setTruckLoading(true);
-  try {
-    const data = await listTrucks({ search: term || undefined, page: 1, pageSize: 50 });
-
-    const items = (data.items ?? []) as Truck[]; // <- on tape la collection
-    const opts: TruckOption[] = items
-      .map((t) => ({
-        id: t.id,
-        label: t.plateNumber ? `${t.plateNumber} — ${t.vin}` : t.vin,
-      }))
-      .sort((a: TruckOption, b: TruckOption) =>
-        a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' })
-      );
-
-    setTruckOptions(opts);
-  } finally {
-    setTruckLoading(false);
+    setTruckLoading(true);
+    try {
+      const data = await listTrucks({ search: term || undefined, page: 1, pageSize: 50 });
+      const items = (data.items ?? []) as Truck[];
+      const opts: TruckOption[] = items
+        .map((t) => ({
+          id: t.id,
+          label: t.plateNumber ? `${t.plateNumber} — ${t.vin}` : t.vin,
+        }))
+        .sort((a: TruckOption, b: TruckOption) =>
+          a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' })
+        );
+      setTruckOptions(opts);
+    } finally {
+      setTruckLoading(false);
+    }
   }
-}
 
   // ---- Effects ----
   useEffect(() => { searchTrucks(''); }, []);
@@ -161,6 +180,13 @@ export default function MaintenancePage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErrors({});
+
+    // ★ Validation "pas de planification dans le passé"
+    if (form.status === MaintenanceStatus.PLANNED && form.scheduledAt && isPast(form.scheduledAt)) {
+      setErrors((prev) => ({ ...prev, scheduledAt: "Impossible de planifier dans le passé." }));
+      return;
+    }
+
     try {
       const payload = normalizeForm(form);
       if (fixedTruckId) payload.truckId = fixedTruckId; // sécurité
@@ -395,10 +421,16 @@ export default function MaintenancePage() {
                   setForm(prev => ({
                     ...prev,
                     status: next,
-                    // si on quitte PLANNED/DONE, on efface la date correspondante
                     scheduledAt: next === MaintenanceStatus.PLANNED ? prev.scheduledAt : '',
                     completedAt: next === MaintenanceStatus.DONE ? prev.completedAt : '',
                   }));
+                  // ★ Reset l’erreur si on quitte PLANNED
+                  if (next !== MaintenanceStatus.PLANNED) {
+                    setErrors((er) => {
+                      const { scheduledAt, ...rest } = er;
+                      return rest;
+                    });
+                  }
                 }}
                 className="border rounded px-2 py-1 w-full"
               >
@@ -416,15 +448,27 @@ export default function MaintenancePage() {
                 <label className="block text-sm mb-1">Planifié pour</label>
                 <input
                   type="datetime-local"
-                  value={form.scheduledAt ? new Date(form.scheduledAt).toISOString().slice(0, 16) : ''}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      scheduledAt: e.target.value ? new Date(e.target.value).toISOString() : '',
-                    })
-                  }
+                  // ★ valeur en local
+                  value={form.scheduledAt ? toInputLocalValue(new Date(form.scheduledAt)) : ''}
+                  // ★ min = maintenant (empêche la sélection d’une date passée)
+                  min={nowLocalMin}
+                  onChange={(e) => {
+                    const iso = e.target.value ? fromInputLocalToISO(e.target.value) : '';
+                    // ★ garde la valeur vide OU future, sinon bloque + message
+                    if (iso && isPast(iso)) {
+                      setErrors((prev) => ({ ...prev, scheduledAt: "Impossible de planifier dans le passé." }));
+                      // on ne modifie pas la valeur si invalide (ou on pourrait la “clamper” à maintenant)
+                      return;
+                    }
+                    setErrors((prev) => {
+                      const { scheduledAt, ...rest } = prev;
+                      return rest;
+                    });
+                    setForm({ ...form, scheduledAt: iso });
+                  }}
                   className="border rounded px-2 py-1 w-full"
                 />
+                {errors.scheduledAt && <p className="text-xs text-red-600">{errors.scheduledAt}</p>}
               </div>
             )}
 
@@ -433,11 +477,11 @@ export default function MaintenancePage() {
                 <label className="block text-sm mb-1">Terminé le</label>
                 <input
                   type="datetime-local"
-                  value={form.completedAt ? new Date(form.completedAt).toISOString().slice(0, 16) : ''}
+                  value={form.completedAt ? toInputLocalValue(new Date(form.completedAt)) : ''}
                   onChange={(e) =>
                     setForm({
                       ...form,
-                      completedAt: e.target.value ? new Date(e.target.value).toISOString() : '',
+                      completedAt: e.target.value ? fromInputLocalToISO(e.target.value) : '',
                     })
                   }
                   className="border rounded px-2 py-1 w-full"
@@ -472,7 +516,12 @@ export default function MaintenancePage() {
             <button type="button" onClick={() => setIsOpen(false)} className="border rounded px-3 py-1">
               Annuler
             </button>
-            <button type="submit" className="border rounded px-3 py-1">
+            <button
+              type="submit"
+              className="border rounded px-3 py-1"
+              // ★ désactive le submit si erreur planification
+              disabled={!!errors.scheduledAt}
+            >
               Créer
             </button>
           </div>

@@ -1,6 +1,6 @@
 // back-office/src/pages/procurement/PurchaseOrdersPage.tsx
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   DataTable,
   type Column,
@@ -14,7 +14,7 @@ type Row = {
   franchiseeId?: string | null;
   warehouseId?: string | null;
   status: POStatus;
-  totalHT?: string | null;   // sera recalculé ci-dessous
+  totalHT?: string | null;
   createdAt: string;
   orderedAt?: string | null;
 };
@@ -22,9 +22,21 @@ type Row = {
 type Franchisee = { id: string; name?: string | null; companyName?: string | null; ownerName?: string | null };
 type Warehouse  = { id: string; name?: string | null; code?: string | null; city?: string | null };
 
-// lignes & prix pour calcul
 type Line = { productId: string; qty: string; unitPriceHT: string };
 type Price = { id: string; productId: string; validFrom: string; validTo?: string | null; priceHT: string; tvaPct: string };
+
+// ── Libellés FR pour les statuts (fallback si nouveau statut apparaît) ─────────
+const STATUS_LABEL: Partial<Record<POStatus, string>> = {
+  DRAFT: 'Brouillon',
+  PENDING: 'En attente',
+  SUBMITTED: 'Soumise',
+  APPROVED: 'Approuvée',
+  ORDERED: 'Commandée',
+  PARTIALLY_RECEIVED: 'Partiellement reçue',
+  RECEIVED: 'Reçue',
+  CANCELLED: 'Annulée',
+};
+const poLabel = (s: POStatus) => STATUS_LABEL[s] ?? String(s);
 
 function toNum(v: string | number) {
   const n = Number(String(v).replace(',', '.'));
@@ -48,7 +60,6 @@ function pickActivePrice(prices: Price[], at: Date): Price | undefined {
 }
 
 export default function PurchaseOrdersPage() {
-  const navigate = useNavigate();
 
   const [items, setItems] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,16 +68,13 @@ export default function PurchaseOrdersPage() {
   const [pageSize] = useState(20);
   const [total, setTotal] = useState(0);
 
-  // caches noms
   const [frMap, setFrMap] = useState<Record<string, Franchisee>>({});
   const [whMap, setWhMap] = useState<Record<string, Warehouse>>({});
 
-  // cache des prix par productId
   const [priceCache, setPriceCache] = useState<Record<string, Price[]>>({});
 
   const STATUS_OPTIONS = Object.values(POStatus) as POStatus[];
 
-  // charge POs
   async function load() {
     setLoading(true);
     try {
@@ -82,7 +90,6 @@ export default function PurchaseOrdersPage() {
         franchiseeId: x.franchiseeId ?? null,
         warehouseId: x.warehouseId ?? null,
         status: x.status as POStatus,
-        // on ignore le total API pour éviter les divergences : on recalcule
         totalHT: null,
         createdAt: x.createdAt ?? new Date().toISOString(),
         orderedAt: x.orderedAt ?? x.createdAt ?? null,
@@ -90,8 +97,6 @@ export default function PurchaseOrdersPage() {
 
       setItems(rows);
       setTotal(typeof data.total === 'number' ? data.total : rows.length);
-
-      // Recalcule le total pour les lignes de la page courante
       await computeTotals(rows);
     } catch (e) {
       console.error(e);
@@ -102,7 +107,6 @@ export default function PurchaseOrdersPage() {
     }
   }
 
-  // noms franchisees/warehouses
   async function hydrateLookups() {
     try {
       const [fr, wh] = await Promise.all([
@@ -120,19 +124,17 @@ export default function PurchaseOrdersPage() {
     }
   }
 
-  // recalcul des totaux (lignes + tarif actif)
   async function computeTotals(orders: Row[]) {
-    // 1) lignes
     const linesByOrder: Record<string, Line[]> = {};
     await Promise.all(
       orders.map(async (o) => {
-                try {
-                  const res = await api.get<{ items: Line[] }>(
-          '/purchase-order-lines',
-          { params: { purchaseOrderId: o.id, page: 1, pageSize: 100 } }
-        );
-        const lines = res.data.items ?? [];
-          linesByOrder[o.id] = [...lines]; // copie mutable
+        try {
+          const res = await api.get<{ items: Line[] }>(
+            '/purchase-order-lines',
+            { params: { purchaseOrderId: o.id, page: 1, pageSize: 100 } }
+          );
+          const lines = res.data.items ?? [];
+          linesByOrder[o.id] = [...lines];
         } catch (e) {
           console.warn('Lignes indisponibles pour', o.id, e);
           linesByOrder[o.id] = [];
@@ -140,13 +142,9 @@ export default function PurchaseOrdersPage() {
       })
     );
 
-    // 2) prix nécessaires
     const productIds = Array.from(new Set(Object.values(linesByOrder).flat().map(l => l.productId).filter(Boolean)));
-
-    // construit un cache local (inclut le state actuel)
     let cache: Record<string, Price[]> = { ...priceCache };
 
-    // fetch prix manquants
     const toFetch = productIds.filter(pid => !cache[pid]);
     if (toFetch.length) {
       const entries = await Promise.all(
@@ -156,20 +154,16 @@ export default function PurchaseOrdersPage() {
               '/product-prices',
               { params: { productId: pid, page: 1, pageSize: 100 } }
             );
-            const items = [...(res.data.items ?? [])] as Price[]; // évite readonly
-            return [pid, items];
-          } catch (e) {
-            console.warn('Prix indisponibles pour', pid, e);
+            return [pid, [...(res.data.items ?? [])]];
+          } catch {
             return [pid, []];
           }
         })
       );
       for (const [pid, prices] of entries) cache[pid] = prices;
-      // push en state (async) mais on travaille déjà avec `cache`
       setPriceCache(cache);
     }
 
-    // 3) calcule
     const updates: Record<string, string> = {};
     for (const o of orders) {
       const at = new Date(o.orderedAt ?? o.createdAt);
@@ -183,15 +177,12 @@ export default function PurchaseOrdersPage() {
       }, 0);
       updates[o.id] = total.toFixed(2);
     }
-
-    // 4) applique au state
     setItems(prev => prev.map(x => (updates[x.id] ? { ...x, totalHT: updates[x.id] } : x)));
   }
 
   useEffect(() => { void hydrateLookups(); }, []);
   useEffect(() => { void load(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [status, page, pageSize]);
 
-  // Formatters
   const fmtDateTime = (iso: string) => new Date(iso).toLocaleString();
   const shortId = (id?: string | null) => (id ? `${id.slice(0, 8)}…` : '—');
 
@@ -201,7 +192,6 @@ export default function PurchaseOrdersPage() {
     const label = f?.name || f?.companyName || f?.ownerName;
     return label ? label : shortId(id);
   };
-
   const displayWarehouse = (id?: string | null) => {
     if (!id) return '—';
     const w = whMap[id];
@@ -221,8 +211,12 @@ export default function PurchaseOrdersPage() {
         const wid = po.warehouseId ?? '';
         return whMap[wid]?.name ?? whMap[wid]?.code ?? wid;
       }, width: 'w-48' },
-    { header: 'Statut', render: (po) => po.status,
-      getSortValue: (po) => (Object.values(POStatus) as POStatus[]).indexOf(po.status), width: 'w-40' },
+    {
+      header: 'Statut',
+      render: (po) => poLabel(po.status),
+      getSortValue: (po) => poLabel(po.status).toLowerCase(),
+      width: 'w-40',
+    },
     { header: 'Total HT', render: (po) => fmtEUR(po.totalHT),
       getSortValue: (po) => Number(po.totalHT ?? 0), align: 'right', width: 'w-32' },
     { header: 'Créée le', render: (po) => fmtDateTime(po.createdAt), getSortValue: (po) => po.createdAt, width: 'w-44' },
@@ -245,9 +239,10 @@ export default function PurchaseOrdersPage() {
             className="border rounded px-2 py-1 text-sm"
           >
             <option value="ALL">Tous statuts</option>
-            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>{poLabel(s)}</option>
+            ))}
           </select>
-
         </div>
       </header>
 

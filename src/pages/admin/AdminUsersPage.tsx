@@ -155,12 +155,6 @@ export default function AdminUsersPage() {
       thClassName: 'w-56',
     },
     {
-      header: 'Dernière connexion',
-      render: (u) => (u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'),
-      getSortValue: (u) => (u.lastLoginAt ? new Date(u.lastLoginAt).getTime() : -1),
-      thClassName: 'w-56',
-    },
-    {
       header: (
         <div className="flex items-center justify-end">
           <button onClick={openCreate} className="underline">+ Créer</button>

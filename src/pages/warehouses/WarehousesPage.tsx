@@ -93,7 +93,6 @@ export default function WarehousesPage() {
             <th className="text-left px-3 py-2">Ville</th>
             <th className="text-left px-3 py-2">Code postal</th>
             <th className="text-left px-3 py-2">Cuisine</th>
-            <th className="text-left px-3 py-2">Actif</th>
             <th className="text-right px-3 py-2">Actions</th>
           </tr></thead>
           <tbody>
@@ -103,7 +102,6 @@ export default function WarehousesPage() {
               <td className="px-3 py-2">{w.city ?? '—'}</td>
               <td className="px-3 py-2">{w.postalCode ?? '—'}</td>
               <td className="px-3 py-2">{w.hasKitchen ? 'Oui' : 'Non'}</td>
-              <td className="px-3 py-2">{w.active ? 'Actif' : 'Inactif'}</td>
               <td className="px-3 py-2 text-right">
                 <button onClick={()=>openEdit(w)} className="underline">Éditer</button>
               </td>

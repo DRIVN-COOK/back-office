@@ -64,10 +64,6 @@ export default function FranchiseeForm({ value, onChange, warehouses, warehouses
             {warehousesLoading && <span className="text-xs opacity-60">Chargement…</span>}
           </div>
         </div>
-
-        <label className="inline-flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={value.active} onChange={(e) => set({ active: e.target.checked })} /> Actif
-        </label>
       </div>
     </fieldset>
   );

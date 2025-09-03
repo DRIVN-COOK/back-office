@@ -209,7 +209,6 @@ export default function SuppliersPage() {
               <th className="text-left px-3 py-2">Nom</th>
               <th className="text-left px-3 py-2">Email</th>
               <th className="text-left px-3 py-2">Téléphone</th>
-              <th className="text-left px-3 py-2">Actif</th>
               <th className="text-right px-3 py-2">Actions</th>
             </tr>
           </thead>
@@ -219,7 +218,6 @@ export default function SuppliersPage() {
                 <td className="px-3 py-2">{s.name}</td>
                 <td className="px-3 py-2">{s.contactEmail ?? '—'}</td>
                 <td className="px-3 py-2">{s.contactPhone ?? '—'}</td>
-                <td className="px-3 py-2">{s.active ? 'Actif' : 'Inactif'}</td>
                 <td className="px-3 py-2 text-right">
                   <button onClick={() => openEdit(s)} className="underline">
                     Éditer
